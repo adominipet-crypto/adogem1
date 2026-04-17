@@ -1,0 +1,23 @@
+name: Aibaryu_Scanner
+
+on:
+  schedule:
+    - cron: '0 14 * * 1-5' # 日本時間 23:00
+  workflow_dispatch:      # 手動実行ボタン
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install yfinance pandas openpyxl
+      - name: Run script
+        env:
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: python adogem1.py
