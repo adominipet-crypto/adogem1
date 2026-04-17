@@ -1,4 +1,4 @@
-name: Aibaryu_Scanner
+name: adoGEM_Scanner
 
 on:
   schedule:
