@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install dependencies
-        run: pip install yfinance pandas openpyxl
+        run: pip install yfinance pandas openpyxl xlrd
       - name: Run script
         env:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
