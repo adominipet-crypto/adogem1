@@ -55,7 +55,6 @@ def scan_stocks():
                 continue
 
             # --- 1. 出来高フィルター（9059対策） ---
-            # 直近5日間の平均出来高が50,000株未満なら除外
             avg_volume = hist['Volume'].tail(5).mean()
             if avg_volume < 50000:
                 continue
@@ -65,7 +64,7 @@ def scan_stocks():
             mcap = info.get('marketCap', 0)
             if mcap == 0: continue
             
-            # ラベル分け（具体的な数字は出力しない）
+            # ラベル分け
             mcap_label = ""
             if mcap >= 1000 * 10**8:
                 mcap_label = "【大型 1000億以上】"
@@ -76,19 +75,35 @@ def scan_stocks():
 
             # 指標計算
             close = hist['Close']
+            open_p = hist['Open'] # 始値を取得
             ma5 = close.rolling(window=5).mean()
             ma20 = close.rolling(window=20).mean()
             ma60 = close.rolling(window=60).mean()
 
             last_close = close.iloc[-1]
+            last_open = open_p.iloc[-1]
             prev_close = close.iloc[-2]
             last_ma5 = ma5.iloc[-1]
             prev_ma5 = ma5.iloc[-2]
             last_ma20 = ma20.iloc[-1]
             last_ma60 = ma60.iloc[-1]
             
-            # 下半身判定
-            is_kahanshin = prev_close < prev_ma5 and last_close > last_ma5
+            # --- 【修正】相葉流「真・下半身」の判定ロジック ---
+            
+            # ① 陽線判定 (終値 > 始値)
+            is_yang_sen = last_close > last_open
+            
+            # ② 5日線を上抜けている (前日は下、当日は上)
+            cross_up = prev_close < prev_ma5 and last_close > last_ma5
+            
+            # ③ 実体の半分以上が5日線の上にあるか
+            body_length = last_close - last_open # 陽線なので必ず正
+            above_ma5_part = last_close - last_ma5
+            is_half_up = above_ma5_part > (body_length / 2)
+            
+            # すべてを満たす場合のみ「下半身」
+            is_kahanshin = is_yang_sen and cross_up and is_half_up
+            
             # PPP判定
             is_ppp = last_ma5 > last_ma20 > last_ma60
 
@@ -100,7 +115,6 @@ def scan_stocks():
                 else:
                     break
             
-            # 上昇6日目以降で、当日が陰線（または前日比マイナス）なら除外
             if days_above_ma5 >= 6 and last_close <= prev_close:
                 continue
 
@@ -115,7 +129,7 @@ def scan_stocks():
                 res_str = f"{mcap_label}{tag}{code.replace('.T', '')} {name}{extra_tag}"
                 results.append(res_str)
                 
-            time.sleep(1.2) # サーバー負荷軽減
+            time.sleep(1.2) # 500エラー対策
             
         except Exception:
             continue
