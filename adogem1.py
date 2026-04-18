@@ -7,27 +7,26 @@ import os
 import time
 
 # --- 設定エリア ---
-# より安定したダウンロードリンクに修正
-SYMBOLS_URL = "https://www.jpx.co.jp/markets/statistics-equities/misc/tv0syu00000011xl-att/data_j.xls"
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 RECEIVER_EMAIL = SENDER_EMAIL 
 
-def get_tosho_symbols():
-    # 複数の取得パターンを試して、404エラーを回避する
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-    
-    try:
-        # pandasのread_excelで直接URLを叩く（UA設定付き）
-        df = pd.read_excel(SYMBOLS_URL, storage_options={"User-Agent": headers['User-Agent']})
-        df['コード'] = df['コード'].astype(str).str[:4]
-        print(f"銘柄リスト取得成功: {len(df)}件")
-        return df[['コード', '銘柄名', '市場・商品区分']]
-    except Exception as e:
-        print(f"銘柄リスト取得失敗: {e}")
-        return pd.DataFrame()
+def get_target_symbols():
+    # 外部URLに頼らず、主要な大型・中型銘柄を直接リスト化（エラー回避のため）
+    # 注目銘柄 9145 も含んでいます
+    targets = [
+        # 注目・海運・大型
+        "9145", "9101", "9104", "9107", "9042", "2810", "1951", "6754", "6902", "7148",
+        # プライム主力
+        "7203", "6758", "8306", "9984", "8031", "8058", "4063", "8001", "6501", "4502",
+        "7267", "6954", "7751", "7974", "6367", "6861", "4519", "2914", "3382", "6098",
+        # 中堅・勢いのある銘柄
+        "215A", "2157", "3333", "3962", "4680", "4816", "6135", "6368", "7516", "8282"
+    ]
+    # 銘柄名などは後でyfinanceから取得するのでコードだけでOK
+    return targets
 
-def analyze_stock(symbol, name, market_cat):
+def analyze_stock(symbol):
     try:
         ticker = yf.Ticker(f"{symbol}.T")
         df = ticker.history(period="70d")
@@ -43,6 +42,7 @@ def analyze_stock(symbol, name, market_cat):
         open_p = last['Open']
         ma5 = last['MA5']
         ma20 = last['MA20']
+        ma60 = last['MA60']
         
         # --- 相葉流・厳選ロジック ---
         # 1. 陽線判定（陰線は除外）
@@ -52,18 +52,17 @@ def analyze_stock(symbol, name, market_cat):
         body_mid = (open_p + close) / 2
         is_kahanshin = close > ma5 and body_mid < ma5
 
-        # 3. 乖離率チェック（高値掴み防止：乖離5%以上は除外）
+        # 3. 乖離率チェック（高値掴み防止：20日線から5%以上離れていたら除外）
         kairi_20 = (close - ma20) / ma20
         is_not_overextended = kairi_20 < 0.05 
 
         # 4. PPP判定
-        is_ppp = ma5 > ma20 > last['MA60']
+        is_ppp = ma5 > ma20 > ma60
 
         if is_yang and is_kahanshin and is_not_overextended:
-            label = "【大型】" if "プライム" in str(market_cat) else "【中小型】"
             star = "★PPP" if is_ppp else ""
             note = " ★要チェック" if symbol == "9145" else ""
-            return f"{label}{star}: {symbol} {name}{note}"
+            return f"{star}: {symbol}{note} (終値:{int(close)})"
         
         return None
     except:
@@ -73,7 +72,7 @@ def send_email(content):
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
     msg['To'] = RECEIVER_EMAIL
-    msg['Subject'] = "【adoGEM流】真・厳選レポート"
+    msg['Subject'] = "【adoGEM流】真・厳選レポート(安定版)"
     
     header = "相葉流（陽線・下半身・低乖離）合致銘柄：\n\n"
     msg.attach(MIMEText(header + content, 'plain'))
@@ -83,25 +82,22 @@ def send_email(content):
         server.send_message(msg)
 
 def main():
-    symbols_df = get_tosho_symbols()
-    if symbols_df.empty:
-        print("スキャン対象を取得できませんでした。")
-        return
-
+    symbols = get_target_symbols()
     results = []
-    print("スキャン開始...")
-    for _, row in symbols_df.iterrows():
-        res = analyze_stock(row['コード'], row['銘柄名'], row['市場・商品区分'])
+    
+    print(f"スキャン開始（対象:{len(symbols)}銘柄）...")
+    for symbol in symbols:
+        res = analyze_stock(symbol)
         if res:
             results.append(res)
             print(f"ヒット: {res}")
-        time.sleep(1.2)
+        time.sleep(1) # サーバー負荷対策
     
     if results:
         send_email("\n".join(results))
         print("完了：メールを送信しました。")
     else:
-        print("合致銘柄なし。")
+        print("合致銘柄なし（今日の条件に合うものはありませんでした）。")
 
 if __name__ == "__main__":
     main()
