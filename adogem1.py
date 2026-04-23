@@ -10,17 +10,15 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 def analyze_stock(symbol):
-    """adoGEM流：下半身判定 ＋ ETF/REIT除外"""
-    # 【高速化】コード番号でETF/REITの可能性が高いものを即スキップ
+    """adoGEM流：下半身 ＋ ETF除外 ＋ 時価総額0除外 ＋ 高値圏警戒"""
     s = int(symbol)
-    if 1300 <= s <= 1699: return None # ETF関連をスキップ
-    if 8950 <= s <= 8989: return None # REIT関連をスキップ
+    if 1300 <= s <= 1699: return None 
+    if 8950 <= s <= 8989: return None 
 
     try:
         ticker = yf.Ticker(f"{symbol}.T")
         df = ticker.history(period="70d")
         
-        # 出来高フィルター（5万株未満はスキップ）
         if df.empty or len(df) < 60 or df['Volume'].iloc[-1] < 50000:
             return None
 
@@ -36,34 +34,40 @@ def analyze_stock(symbol):
         ma60_prev = prev['MA60']
 
         # --- adoGEM流 厳格フィルター ---
-        if not (close > open_p): return None # 陽線
-        if not (open_p < ma5 < close): return None # 5日線をまたぐ
+        if not (close > open_p): return None 
+        if not (open_p < ma5 < close): return None 
         body_len = close - open_p
-        if (close - ma5) / body_len <= 0.5: return None # 実体の半分以上が上
-        if (close - ma20) / ma20 >= 0.05: return None # 乖離5%以内
-        if (high - close) >= body_len: return None # 上ヒゲ制限
-        if ma60 < ma60_prev: return None # 60日線が上向き
+        if (close - ma5) / body_len <= 0.5: return None 
+        if (close - ma20) / ma20 >= 0.05: return None 
+        if (high - close) >= body_len: return None 
+        if ma60 < ma60_prev: return None 
+
+        # --- 追加ロジック：高値圏・ダブル天井警戒 ---
+        # 過去70日の最高値を取得
+        max_high = df['High'].max()
+        # 最高値から3%以内の位置にいる場合は「高値圏」として除外（8142対策）
+        if close >= (max_high * 0.97):
+            return None
 
         # --- 的中後の詳細チェック ---
         info = ticker.info
+        mkt_cap = info.get('marketCap', 0)
         
-        # セクターを取得して「REIT/ETF」が含まれていたら除外（二段構えのガード）
-        sector = info.get('sector', '不明')
-        if sector in ['Financial', 'None', None] and 'REIT' in info.get('longBusinessSummary', ''):
+        # 時価総額0億円（データ無し）は削除
+        if mkt_cap == 0:
             return None
 
-        mkt_cap = info.get('marketCap', 0)
+        sector = info.get('sector', '不明')
         caution = "★仕手注意 " if 0 < mkt_cap < 10000000000 else ""
         is_ppp = ma5 > ma20 > ma60
         status = "★PPP" if is_ppp else ""
         
-        # 業種（sector）を表示に含める
         return f"{caution}{status} {symbol}: 終値{int(close)}円 (時価:{int(mkt_cap/100000000)}億 / 業種:{sector})"
     except:
         return None
 
 def main():
-    print("--- adoGEM流スキャナー起動 (ETF/REIT除外設定) ---")
+    print("--- adoGEM流スキャナー起動 (高値圏/時価0除外) ---")
     results = [] 
     codes = [str(i) for i in range(1300, 9999)]
     
@@ -73,13 +77,11 @@ def main():
             print(f"【的中】: {res}")
             results.append(res)
         if int(symbol) % 1000 == 0:
-            print(f"現在 {symbol} 付近をチェック中...")
-
-    print(f"スキャン終了。的中数: {len(results)}")
+            print(f"チェック中... {symbol}")
 
     if results:
         msg = MIMEMultipart()
-        msg['Subject'] = f"【的中】adoGEM流 厳格下半身リスト({len(results)}件)"
+        msg['Subject'] = f"【的中】adoGEM流 精鋭リスト({len(results)}件)"
         msg['From'] = SENDER_EMAIL
         msg['To'] = SENDER_EMAIL
         msg.attach(MIMEText("\n".join(results), 'plain'))
@@ -91,7 +93,7 @@ def main():
             server.quit()
             print("メール送信に成功しました！")
         except Exception as e:
-            print(f"メール送信エラー: {e}")
+            print(f"エラー: {e}")
 
 if __name__ == "__main__":
     main()
