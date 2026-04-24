@@ -10,7 +10,7 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 def analyze_stock(symbol):
-    """adoGEM流：下半身 ＋ ETF除外 ＋ 時価総額0除外 ＋ 高値圏警戒"""
+    """adoGEM流：下半身 ＋ ETF除外 ＋ 時価0除外 ＋ 高値圏/直近高値割れ判定"""
     s = int(symbol)
     if 1300 <= s <= 1699: return None 
     if 8950 <= s <= 8989: return None 
@@ -42,32 +42,37 @@ def analyze_stock(symbol):
         if (high - close) >= body_len: return None 
         if ma60 < ma60_prev: return None 
 
-        # --- 追加ロジック：高値圏・ダブル天井警戒 ---
-        # 過去70日の最高値を取得
+        # --- 詳細判定ロジック ---
+        # 1. 過去70日の最高値
         max_high = df['High'].max()
-        # 最高値から3%以内の位置にいる場合は「高値圏」として除外（8142対策）
+        
+        # 2. 直近の高値（直近10日間の中での最高値）
+        recent_max = df['High'].iloc[-10:-1].max()
+
+        # 高値圏フィルター（最高値の3%以内なら除外）
         if close >= (max_high * 0.97):
             return None
+
+        # 直近高値割れの判定
+        is_break_high = close < recent_max
+        high_caution = "★直近高値割れ " if is_break_high else ""
 
         # --- 的中後の詳細チェック ---
         info = ticker.info
         mkt_cap = info.get('marketCap', 0)
-        
-        # 時価総額0億円（データ無し）は削除
-        if mkt_cap == 0:
-            return None
+        if mkt_cap == 0: return None
 
         sector = info.get('sector', '不明')
         caution = "★仕手注意 " if 0 < mkt_cap < 10000000000 else ""
         is_ppp = ma5 > ma20 > ma60
         status = "★PPP" if is_ppp else ""
         
-        return f"{caution}{status} {symbol}: 終値{int(close)}円 (時価:{int(mkt_cap/100000000)}億 / 業種:{sector})"
+        return f"{high_caution}{caution}{status} {symbol}: 終値{int(close)}円 (時価:{int(mkt_cap/100000000)}億 / 業種:{sector})"
     except:
         return None
 
 def main():
-    print("--- adoGEM流スキャナー起動 (高値圏/時価0除外) ---")
+    print("--- adoGEM流スキャナー起動 (高値割れ警戒モード) ---")
     results = [] 
     codes = [str(i) for i in range(1300, 9999)]
     
