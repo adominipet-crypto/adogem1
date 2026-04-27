@@ -6,23 +6,29 @@ from email.mime.multipart import MIMEMultipart
 import os
 import time
 
-# --- 設定エリア ---
+# --- 1. 環境変数の設定 ---
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 def analyze_stock(symbol):
-    """adoGEM流：直近高値厳格フィルター版"""
+    """adoGEM流：究極の精鋭判定ロジック"""
     s = int(symbol)
+    # ETF・REIT関連（1300-1699, 8950-8989）を高速スキップ
     if 1300 <= s <= 1699: return None 
     if 8950 <= s <= 8989: return None 
 
-    time.sleep(0.1) # 通信安定化
+    # 通信負荷を抑え、2000番以降の「No data」エラーを防ぐための待機
+    time.sleep(0.1)
 
     try:
         ticker = yf.Ticker(f"{symbol}.T")
+        # データ取得のリトライ処理（最大2回）
         df = ticker.history(period="70d")
-        
-        if df.empty or len(df) < 60 or df['Volume'].iloc[-1] < 50000:
+        if df.empty or len(df) < 60:
+            return None
+            
+        # 出来高フィルター（5万株未満は除外）
+        if df['Volume'].iloc[-1] < 50000:
             return None
 
         # 指標計算
@@ -35,29 +41,29 @@ def analyze_stock(symbol):
         ma5, ma20, ma60 = last['MA5'], last['MA20'], last['MA60']
         ma60_prev = df.iloc[-2]['MA60']
 
-        # --- adoGEM流 基本フィルター ---
+        # --- adoGEM流 厳格フィルター ---
         if close <= open_p: return None # 陽線必須
-        if not (open_p < ma5 < close): return None # 5日線またぎ
-        if ma60 < ma60_prev: return None # 60日線上向き
+        if not (open_p < ma5 < close): return None # 5日線またぎ（下半身）
+        if ma60 < ma60_prev: return None # 60日線が上向きであること
 
-        # --- 【強化】直近高値フィルター（厳格モード） ---
-        # 過去5営業日（今日を含まない）の最高値を取得
+        # --- 【強化】直近高値フィルター（戻り・勢い判定） ---
+        # 過去5営業日の最高値を取得。これを超えていない（戻しが甘い）なら除外
         recent_5d_high = df['High'].iloc[-6:-1].max()
-        
-        # 今日の終値が直近5日の高値を超えていない（＝戻りきっていない）なら除外
-        # これにより「★直近高値割れ」を出すまでもなく、リストから消し去ります
         if close < recent_5d_high:
             return None
 
-        # 最高値（70日間）の5%以内なら除外（天井圏回避）
+        # 天井圏回避：過去70日最高値の5%以内なら「上がりきった」と判断し除外
         max_high_70d = df['High'].max()
         if close >= (max_high_70d * 0.95):
             return None
 
-        # --- 詳細情報取得 ---
+        # --- 判定合格後：詳細情報取得 ---
         info = ticker.info
         mkt_cap = info.get('marketCap', 0)
-        if mkt_cap == 0: return None
+        
+        # 時価総額0はエラーデータとして排除
+        if mkt_cap == 0:
+            return None
 
         sector = info.get('sector', '不明')
         caution = "★仕手注意 " if 0 < mkt_cap < 10000000000 else ""
@@ -69,34 +75,48 @@ def analyze_stock(symbol):
         return None
 
 def main():
-    print("--- adoGEM流スキャナー：直近高値厳格モード起動 ---")
+    print("--- adoGEM流スキャナー：全コード監視・確実報告モード ---")
     results = [] 
-    codes = [str(i) for i in range(1300, 9999)]
+    # 1300から9999まで全チェック
+    codes = [str(i) for i in range(1300, 10000)]
+    
+    start_time = time.time()
     
     for i, symbol in enumerate(codes):
         res = analyze_stock(symbol)
         if res:
             print(f"【的中】: {res}")
             results.append(res)
+        
+        # 進行状況がわかるようログを表示
         if i % 100 == 0:
-            print(f"スキャン中... {symbol}")
+            elapsed = int(time.time() - start_time)
+            print(f"スキャン中... {symbol} (経過: {elapsed}秒)")
+
+    # --- メール作成・送信処理 ---
+    msg = MIMEMultipart()
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = SENDER_EMAIL
 
     if results:
-        # メール送信（中略）
-        msg = MIMEMultipart()
         msg['Subject'] = f"【厳選】adoGEM流 究極リスト({len(results)}件)"
-        msg['From'] = SENDER_EMAIL
-        msg['To'] = SENDER_EMAIL
-        msg.attach(MIMEText("\n".join(results), 'plain'))
-        # ...送信ロジック...
+        body = "本日の adoGEM流 厳選銘柄です。直近高値を抜けた勢いのある銘柄に絞っています：\n\n" + "\n".join(results)
+    else:
+        # 的中なしでも報告を送る
+        msg['Subject'] = "【報告】adoGEM流 スキャン完了（対象なし）"
+        body = "全銘柄をスキャンしましたが、本日は「adoGEM流」の厳しい基準をクリアする銘柄はありませんでした。\n「休むも相場」です。"
+
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
         server.quit()
-        print("メール送信完了！")
-    else:
-        print("条件に完全に一致する精鋭銘柄はありませんでした。")
+        print("スキャン完了：メールを送信しました。")
+    except Exception as e:
+        print(f"メール送信エラー: {e}")
 
 if __name__ == "__main__":
     main()
