@@ -1,21 +1,28 @@
-name: adoGEM_Scanner
+name: adoGEM Daily Scan
 
 on:
   schedule:
-    - cron: '0 14 * * 1-5' # 日本時間 23:00
-  workflow_dispatch:      # 手動実行ボタン
+    - cron: '0 9 * * *' # 日本時間 18:00
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
+
       - name: Install dependencies
-        run: pip install yfinance pandas openpyxl xlrd
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Run script
         env:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
