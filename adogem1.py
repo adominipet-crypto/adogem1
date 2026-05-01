@@ -6,27 +6,34 @@ from email.mime.multipart import MIMEMultipart
 import os
 import time
 
-# --- 設定エリア ---
+# --- 1. 環境変数の設定 ---
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 def analyze_batch(symbols):
-    """100銘柄単位で一括判定するadoGEM流ロジック"""
-    results = []
-    # 銘柄リストをYahoo Finance形式に変換
+    """adoGEM流：一括取得＆実体割り込み厳格判定"""
+    batch_results = []
+    # 除外設定（ETF/REIT）
     tickers = [f"{s}.T" for s in symbols if not (1300 <= int(s) <= 1699 or 8950 <= int(s) <= 8989)]
     
+    if not tickers:
+        return batch_results
+
     try:
-        # 一括ダウンロード（通信回数を激減させる）
+        # 一括ダウンロード（通信1回で最大100銘柄分を取得）
         data = yf.download(tickers, period="70d", interval="1d", group_by='ticker', threads=True, progress=False)
         
         for t_str in tickers:
             try:
-                df = data[t_str]
+                # 複数銘柄データから個別データを抽出
+                df = data[t_str].dropna()
                 symbol = t_str.replace(".T", "")
                 
-                # データが足りない、または出来高が少ない場合は削除
-                if df.empty or len(df) < 60 or df['Volume'].iloc[-1] < 50000:
+                if df.empty or len(df) < 60:
+                    continue
+                
+                # 出来高フィルター
+                if df['Volume'].iloc[-1] < 50000:
                     continue
 
                 # 指標計算
@@ -36,49 +43,86 @@ def analyze_batch(symbols):
 
                 last = df.iloc[-1]
                 prev = df.iloc[-2]
-                close, open_p, high = last['Close'], last['Open'], last['High']
+                close, open_p = last['Close'], last['Open']
                 ma5, ma20, ma60 = last['MA5'], last['MA20'], last['MA60']
                 close_prev, ma5_prev, ma60_prev = prev['Close'], prev['MA5'], prev['MA60']
 
-                # --- adoGEM流：削除フィルター ---
-                if close <= open_p: continue # 陽線でない
-                if not (open_p < ma5 < close): continue # 下半身でない
-                if close_prev >= ma5_prev: continue # 【3110対策】実体で割っていない
-                if ma60 < ma60_prev: continue # 60日線が下向き
+                # --- adoGEM流：削除条件の適用 ---
+                
+                # 1. 陽線でないなら削除
+                if close <= open_p: continue 
+                # 2. 5日線またぎでないなら削除
+                if not (open_p < ma5 < close): continue 
+                
+                # 3. 【3110対策】前日の終値が実体で5日線を割っていないなら削除
+                # これにより「ヒゲで触れただけの強いトレンド」は除外され、本物の初動だけが残ります。
+                if close_prev >= ma5_prev:
+                    continue
 
-                # 勢いと天井圏の判定
+                # 4. 60日線が下向きなら削除
+                if ma60 < ma60_prev: continue 
+
+                # 5. 直近5日間の最高値を超えていないなら削除
                 recent_5d_high = df['High'].iloc[-6:-1].max()
                 if close < recent_5d_high: continue
+
+                # 6. 天井圏（70日最高値の5%以内）なら削除
                 max_high_70d = df['High'].max()
                 if close >= (max_high_70d * 0.95): continue
 
-                # 判定合格
-                results.append(f"的中候補 {symbol}: 終値{int(close)}円")
-            except:
+                # --- 合格銘柄の情報整理（簡易取得） ---
+                is_ppp = ma5 > ma20 > ma60
+                status = "★PPP" if is_ppp else ""
+                batch_results.append(f"{status} {symbol}: 終値{int(close)}円")
+
+            except Exception:
                 continue
     except Exception as e:
-        print(f"バッチ処理エラー: {e}")
+        print(f"バッチエラー: {e}")
     
-    return results
+    return batch_results
 
 def main():
-    print("--- adoGEM流：一括高速スキャン（9999完走版）起動 ---")
+    print("--- adoGEM流：一括高速スキャン（完走保証版） ---")
     all_results = []
-    # 1300から9999まで
-    all_codes = [str(i) for i in range(1300, 10000)]
+    # 1300から9999まで全対象
+    codes = [str(i) for i in range(1300, 10000)]
     
-    # 100銘柄ずつまとめて処理
+    # 100銘柄ずつまとめてリクエストを送る
     batch_size = 100
-    for i in range(0, len(all_codes), batch_size):
-        batch = all_codes[i:i+batch_size]
-        print(f"スキャン中... {batch[0]} - {batch[-1]}")
+    for i in range(0, len(codes), batch_size):
+        batch = codes[i:i+batch_size]
+        print(f"チェック中: {batch[0]} - {batch[-1]}")
         
-        batch_hits = analyze_batch(batch)
-        all_results.extend(batch_hits)
+        hits = analyze_batch(batch)
+        all_results.extend(hits)
         
-        # 次のバッチまで少し休憩（サーバーに優しく）
+        # サーバーへの礼儀として2秒待機
         time.sleep(2)
 
-    # メール送信処理（的中なし報告付き）
-    # (中略：前回の送信ロジックと同じ)
-    # ...
+    # --- 的中報告メール送信 ---
+    msg = MIMEMultipart()
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = SENDER_EMAIL
+
+    if all_results:
+        msg['Subject'] = f"【厳選】adoGEM流 究極リスト({len(all_results)}件)"
+        body = "本日の adoGEM流 厳選銘柄です（3110等のヒゲ割れは削除済み）：\n\n" + "\n".join(all_results)
+    else:
+        msg['Subject'] = "【報告】adoGEM流 スキャン完了（対象なし）"
+        body = "9999番まで全銘柄をスキャンしましたが、実体で5日線を割り込んだ後の「本物の下半身」は見つかりませんでした。"
+
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print("スキャン完了、メール送信成功。")
+    except Exception as e:
+        print(f"メールエラー: {e}")
+
+if __name__ == "__main__":
+    main()
