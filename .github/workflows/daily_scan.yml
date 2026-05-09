@@ -1,34 +1,18 @@
-name: adoGEM Triple Scan
-
-on:
-  schedule:
-    # 3回に分けて実行（負荷分散とタイムアウト回避）
-    - cron: '0 9 * * *'  # 日本時間 18:00 (1300-4000番)
-    - cron: '0 12 * * *' # 日本時間 21:00 (4001-7000番)
-    - cron: '0 15 * * *' # 日本時間 00:00 (7001-9999番)
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
-      - name: Install dependencies
-        run: pip install pandas pandas_datareader yfinance
       - name: Run Split Scan
         env:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: |
-          # 実行時間（UTC）に基づいて範囲を自動決定
-          HOUR=$(date +%H)
-          if [ "$HOUR" == "09" ]; then
+          # 実行されたスケジュール（cron）の内容で範囲を分ける
+          # 09:00(UTC) = 日本18:00
+          # 12:00(UTC) = 日本21:00
+          # 15:00(UTC) = 日本00:00
+          
+          if [[ "${{ github.event.schedule }}" == "0 9 * * *" ]]; then
             python adogem1.py 1300 4000
-          elif [ "$HOUR" == "12" ]; then
+          elif [[ "${{ github.event.schedule }}" == "0 12 * * *" ]]; then
             python adogem1.py 4001 7000
           else
+            # 手動実行(workflow_dispatch)や深夜便はここを担当
             python adogem1.py 7001 10000
           fi
