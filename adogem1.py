@@ -14,13 +14,13 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 def analyze_stock(symbol):
-    """adoGEM流：最新精査ロジック（条件3＆6削除の攻撃型版）"""
-    s = int(symbol)
-    # ETF/REIT除外
-    if 1300 <= s <= 1699 or 8950 <= s <= 8989:
-        return None
-
+    """adoGEM流：最新精査ロジック（条件3＆6削除版）"""
     try:
+        s = int(symbol)
+        # ETF/REIT除外
+        if 1300 <= s <= 1699 or 8950 <= s <= 8989:
+            return None
+
         # 通信制限回避
         time.sleep(random.uniform(0.8, 1.5))
         
@@ -33,7 +33,7 @@ def analyze_stock(symbol):
         if df is None or df.empty or len(df) < 60:
             return None
         
-        # 出来高フィルター（5万株以上）
+        # 出来高フィルター
         if df['Volume'].iloc[-1] < 50000:
             return None
 
@@ -47,27 +47,18 @@ def analyze_stock(symbol):
         close, open_p, ma5 = last['Close'], last['Open'], last['MA5']
         ma60, ma60_prev = last['MA60'], prev['MA60']
 
-        # --- adoGEM流：判定ロジック ---
-        
+        # --- 判定ロジック ---
         # 1. 陽線判定
         if close <= open_p: return None 
-        
-        # 2. 下半身判定（始値が5日線の下、終値が5日線の上）
+        # 2. 下半身判定
         if not (open_p < ma5 < close): return None 
-        
-        # 【旧条件3：前日の実体割れチェック】は削除済み
-        
-        # 4. 60日線が下向きなら削除（長期トレンド重視）
+        # 4. 60日線が右肩上がり
         if ma60 < ma60_prev: return None 
-
-        # 5. 直近5日間の最高値を更新（もみ合い上放れ重視）
+        # 5. 直近5日間の最高値を更新
         recent_high = df['High'].iloc[-6:-1].max()
         if close < recent_high: return None
-        
-        # 【旧条件6：天井圏（5%以内）の除外】を今回削除しました
-        # これにより、高値圏での横ばい・上放れ期待も検知可能になります
 
-        # 合格：PPP（パンパカパン）判定
+        # 合格：PPP判定
         is_ppp = ma5 > last['MA20'] > ma60
         return f"{'★PPP ' if is_ppp else ''}{symbol}: {int(close)}円"
     except:
@@ -78,7 +69,7 @@ def main():
     start_range = int(sys.argv[1]) if len(sys.argv) > 1 else 1300
     end_range = int(sys.argv[2]) if len(sys.argv) > 2 else 10000
     
-    print(f"--- adoGEM流 スキャン開始: {start_range}-{end_range} ---")
+    print(f"--- adoGEM スキャン開始: {start_range}-{end_range} ---")
     
     all_results = []
     codes = [str(i) for i in range(start_range, end_range)]
@@ -99,7 +90,7 @@ def main():
     if not all_results:
         body = f"{start_range}番から{end_range}番まで精査しましたが、条件を満たす銘柄はありませんでした。"
     else:
-        body = "以下の銘柄が条件をクリアしました（条件3＆6削除・最新版）：\n\n" + "\n".join(all_results)
+        body = "条件をクリアした銘柄一覧（条件3＆6削除版）：\n\n" + "\n".join(all_results)
 
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
@@ -109,4 +100,13 @@ def main():
     
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
-        server
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print("完了しました")
+    except Exception as e:
+        print(f"メール送信失敗: {e}")
+
+if __name__ == "__main__":
+    main()
