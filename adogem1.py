@@ -42,22 +42,20 @@ def analyze_stock(symbol):
         df['MA20'] = df['Close'].rolling(window=20).mean()
         df['MA60'] = df['Close'].rolling(window=60).mean()
         
-        # データの抽出
+        # データの抽出（当日、前日、前々日）
         today = df.iloc[-1]
-        yest = df.iloc[-2]   # 1営業日前
-        yest2 = df.iloc[-3]  # 2営業日前
+        yest = df.iloc[-2]
+        yest2 = df.iloc[-3]
         
         close, open_p = today['Close'], today['Open']
         ma5_today = today['MA5']
         ma60_today, ma60_yest = today['MA60'], yest['MA60']
 
-        # --- 2. 当日の下半身 ＆ 陽線(プラス引け) 判定 ---
-        # 始値 < 5日線 < 終値 かつ 終値 > 始値
+        # --- 2. 当日の下半身 ＆ 陽線判定 ---
         if not (open_p < ma5_today < close): return None
         if close <= open_p: return None 
         
         # --- 3. 2営業日前までの「溜め」判定 ---
-        # 前日と前々日の終値が、それぞれの日の5日線の下にあること
         if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']):
             return None
 
@@ -68,18 +66,18 @@ def analyze_stock(symbol):
         recent_high = df['High'].iloc[-6:-1].max()
         if close < recent_high: return None
         
-        # --- 6. 過熱感回避（直近100日最高値から5%以内の天井圏は除外） ---
+        # --- 6. 過熱感回避（天井圏除外） ---
         max_100 = df['High'].iloc[-100:].max()
         if close >= (max_100 * 0.95): return None
 
-        # 合格：PPP（パンパカパン）判定
+        # 合格：PPP判定
         is_ppp = ma5_today > today['MA20'] > ma60_today
         return f"{'★PPP ' if is_ppp else ''}{symbol}: {int(close)}円"
     except:
         return None
 
 def main():
-    # GitHub Actionsの三分割設定（引数）を読み込み
+    # 引数の受け取り
     if len(sys.argv) > 2:
         start_range = int(sys.argv[1])
         end_range = int(sys.argv[2])
@@ -97,13 +95,13 @@ def main():
             print(f"【的中】{symbol}")
             all_results.append(res)
         
-        # yfinanceへの負荷を考慮したスリープ
+        # 通信負荷軽減
         time.sleep(0.15)
 
-    # 的中報告メール（該当がある場合のみ送信）
+    # 的中報告メール
     if all_results:
         subject = f"【厳選】adoGEM精査報告({start_range}-{end_range})"
-        body = "以下の銘柄が『2日間の溜め』を含む全条件をクリアしました：\n\n" + "\n".join(all_results)
+        body = "以下の銘柄が条件をクリアしました：\n\n" + "\n".join(all_results)
         
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
@@ -117,10 +115,11 @@ def main():
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.send_message(msg)
             server.quit()
-            print(f"報告送信完了（的中:{len(all_results)}件）")
+            print(f"報告送信完了")
         except Exception as e:
             print(f"メール送信失敗: {e}")
     else:
         print("的中なし。")
 
 if __name__ == "__main__":
+    main()
