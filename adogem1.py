@@ -14,7 +14,11 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 def analyze_stock(symbol):
-    """adoGEM流：6大条件すべてを反映した精査ロジック"""
+    """
+    adoGEM流：最新精査ロジック
+    条件：出来高5万以上、当日陽線、下半身(始値下・終値上)、
+    2営業日前まで5MA下(溜め)、60MA右肩上がり、5日新高値、天井圏回避
+    """
     try:
         s = int(symbol)
         # ETF/REIT除外
@@ -23,7 +27,7 @@ def analyze_stock(symbol):
 
         ticker = f"{symbol}.T"
         stock = yf.Ticker(ticker)
-        # 過去100日分のデータを取得（天井圏判定のため）
+        # 判定に必要な期間（約半年分）を取得
         df = stock.history(period="6mo")
         
         if df is None or df.empty or len(df) < 60:
@@ -38,37 +42,44 @@ def analyze_stock(symbol):
         df['MA20'] = df['Close'].rolling(window=20).mean()
         df['MA60'] = df['Close'].rolling(window=60).mean()
         
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
-        close, open_p, high = last['Close'], last['Open'], last['High']
-        ma5, ma60, ma60_prev = last['MA5'], last['MA60'], prev['MA60']
+        # データの抽出
+        today = df.iloc[-1]
+        yest = df.iloc[-2]   # 1営業日前
+        yest2 = df.iloc[-3]  # 2営業日前
+        
+        close, open_p = today['Close'], today['Open']
+        ma5_today = today['MA5']
+        ma60_today, ma60_yest = today['MA60'], yest['MA60']
 
-        # --- 2. 陽線判定 ---
+        # --- 2. 当日の下半身 ＆ 陽線(プラス引け) 判定 ---
+        # 始値 < 5日線 < 終値 かつ 終値 > 始値
+        if not (open_p < ma5_today < close): return None
         if close <= open_p: return None 
         
-        # --- 3. 下半身判定（始値が5日線の下、終値が5日線の上） ---
-        if not (open_p < ma5 < close): return None 
-        
+        # --- 3. 2営業日前までの「溜め」判定 ---
+        # 前日と前々日の終値が、それぞれの日の5日線の下にあること
+        if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']):
+            return None
+
         # --- 4. 長期トレンド（60日線が右肩上がり） ---
-        if ma60 <= ma60_prev: return None 
+        if ma60_today <= ma60_yest: return None 
 
         # --- 5. 新高値（終値が過去5日間の最高値を更新） ---
-        # 当日を含まない過去5日間の「High」の最大値と比較
         recent_high = df['High'].iloc[-6:-1].max()
         if close < recent_high: return None
         
-        # --- 6. 過熱感（直近100日間の最高値から5%以内＝天井圏は除外） ---
+        # --- 6. 過熱感回避（直近100日最高値から5%以内の天井圏は除外） ---
         max_100 = df['High'].iloc[-100:].max()
         if close >= (max_100 * 0.95): return None
 
-        # 合格：PPP（パンパカパン）判定（付加情報）
-        is_ppp = ma5 > last['MA20'] > ma60
+        # 合格：PPP（パンパカパン）判定
+        is_ppp = ma5_today > today['MA20'] > ma60_today
         return f"{'★PPP ' if is_ppp else ''}{symbol}: {int(close)}円"
     except:
         return None
 
 def main():
-    # GitHub Actionsからの引数を受け取る（三分割スキャン用）
+    # GitHub Actionsの三分割設定（引数）を読み込み
     if len(sys.argv) > 2:
         start_range = int(sys.argv[1])
         end_range = int(sys.argv[2])
@@ -76,7 +87,7 @@ def main():
         start_range = 1300
         end_range = 10000
     
-    print(f"--- adoGEM 厳選精査始動: {start_range}-{end_range} ---")
+    print(f"--- adoGEM 厳選精査始動({start_range}-{end_range}) ---")
     
     all_results = []
     for i in range(start_range, end_range):
@@ -86,13 +97,13 @@ def main():
             print(f"【的中】{symbol}")
             all_results.append(res)
         
-        # サーバー負荷軽減（yfinanceは比較的丈夫ですが念のため）
-        time.sleep(0.1)
+        # yfinanceへの負荷を考慮したスリープ
+        time.sleep(0.15)
 
     # 的中報告メール（該当がある場合のみ送信）
     if all_results:
         subject = f"【厳選】adoGEM精査報告({start_range}-{end_range})"
-        body = "以下の銘柄が全6条件をクリアしました：\n\n" + "\n".join(all_results)
+        body = "以下の銘柄が『2日間の溜め』を含む全条件をクリアしました：\n\n" + "\n".join(all_results)
         
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
@@ -106,11 +117,10 @@ def main():
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.send_message(msg)
             server.quit()
-            print(f"報告送信完了（{len(all_results)}件）")
+            print(f"報告送信完了（的中:{len(all_results)}件）")
         except Exception as e:
             print(f"メール送信失敗: {e}")
     else:
         print("的中なし。")
 
 if __name__ == "__main__":
-    main()
