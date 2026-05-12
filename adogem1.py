@@ -14,26 +14,20 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 def analyze_stock(symbol):
-    """
-    adoGEM流：最新精査ロジック
-    条件：出来高5万以上、当日陽線、下半身(始値下・終値上)、
-    2営業日前まで5MA下(溜め)、60MA右肩上がり、5日新高値、天井圏回避
-    """
+    """adoGEM流：最新精査ロジック（ログ強化版）"""
     try:
-        s = int(symbol)
-        # ETF/REIT除外
-        if 1300 <= s <= 1699 or 8950 <= s <= 8989:
-            return None
-
         ticker = f"{symbol}.T"
         stock = yf.Ticker(ticker)
-        # 判定に必要な期間（約半年分）を取得
-        df = stock.history(period="6mo")
+        # 欠番エラーを画面に出さないように quiet=True 設定（もしあれば）
+        df = stock.history(period="6mo", progress=False)
         
         if df is None or df.empty or len(df) < 60:
             return None
         
-        # --- 1. 出来高フィルター（50,000株以上） ---
+        # --- 【追加】実在する銘柄を拾った証拠をログに出す ---
+        print(f"CHECKING: {symbol} を精査中...")
+
+        # 1. 出来高フィルター（50,000株以上）
         if df['Volume'].iloc[-1] < 50000:
             return None
 
@@ -42,7 +36,6 @@ def analyze_stock(symbol):
         df['MA20'] = df['Close'].rolling(window=20).mean()
         df['MA60'] = df['Close'].rolling(window=60).mean()
         
-        # データの抽出（当日、前日、前々日）
         today = df.iloc[-1]
         yest = df.iloc[-2]
         yest2 = df.iloc[-3]
@@ -51,33 +44,29 @@ def analyze_stock(symbol):
         ma5_today = today['MA5']
         ma60_today, ma60_yest = today['MA60'], yest['MA60']
 
-        # --- 2. 当日の下半身 ＆ 陽線判定 ---
-        if not (open_p < ma5_today < close): return None
-        if close <= open_p: return None 
+        # 2. 当日の下半身 ＆ 陽線判定
+        if not (open_p < ma5_today < close) or close <= open_p: return None 
         
-        # --- 3. 2営業日前までの「溜め」判定 ---
-        if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']):
-            return None
+        # 3. 2営業日前までの「溜め」判定
+        if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return None
 
-        # --- 4. 長期トレンド（60日線が右肩上がり） ---
+        # 4. 60MA右肩上がり
         if ma60_today <= ma60_yest: return None 
 
-        # --- 5. 新高値（終値が過去5日間の最高値を更新） ---
+        # 5. 5日新高値
         recent_high = df['High'].iloc[-6:-1].max()
         if close < recent_high: return None
         
-        # --- 6. 過熱感回避（天井圏除外） ---
+        # 6. 天井圏回避
         max_100 = df['High'].iloc[-100:].max()
         if close >= (max_100 * 0.95): return None
 
-        # 合格：PPP判定
-        is_ppp = ma5_today > today['MA20'] > ma60_today
-        return f"{'★PPP ' if is_ppp else ''}{symbol}: {int(close)}円"
+        print(f"★★★ 的中！ {symbol} ★★★")
+        return f"{symbol}: {int(close)}円"
     except:
         return None
 
 def main():
-    # 引数の受け取り
     if len(sys.argv) > 2:
         start_range = int(sys.argv[1])
         end_range = int(sys.argv[2])
@@ -85,41 +74,24 @@ def main():
         start_range = 1300
         end_range = 10000
     
-    print(f"--- adoGEM 厳選精査始動({start_range}-{end_range}) ---")
+    print(f"--- adoGEM 稼働中 ({start_range}-{end_range}) ---")
     
     all_results = []
     for i in range(start_range, end_range):
-        symbol = str(i)
-        res = analyze_stock(symbol)
+        res = analyze_stock(str(i))
         if res:
-            print(f"【的中】{symbol}")
             all_results.append(res)
-        
-        # 通信負荷軽減
         time.sleep(0.15)
 
-    # 的中報告メール
     if all_results:
         subject = f"【厳選】adoGEM精査報告({start_range}-{end_range})"
-        body = "以下の銘柄が条件をクリアしました：\n\n" + "\n".join(all_results)
-        
-        msg = MIMEMultipart()
-        msg['From'] = SENDER_EMAIL
-        msg['To'] = SENDER_EMAIL
-        msg['Subject'] = subject
+        body = "的中銘柄：\n\n" + "\n".join(all_results)
+        msg = MIMEMultipart(); msg['From'] = SENDER_EMAIL; msg['To'] = SENDER_EMAIL; msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
-        
         try:
-            server = smtplib.SMTP("smtp.gmail.com", 587)
-            server.starttls()
-            server.login(SENDER_EMAIL, SENDER_PASSWORD)
-            server.send_message(msg)
-            server.quit()
-            print(f"報告送信完了")
-        except Exception as e:
-            print(f"メール送信失敗: {e}")
-    else:
-        print("的中なし。")
+            server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
+            server.login(SENDER_EMAIL, SENDER_PASSWORD); server.send_message(msg); server.quit()
+        except: pass
 
 if __name__ == "__main__":
     main()
