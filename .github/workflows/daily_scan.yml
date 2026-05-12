@@ -2,10 +2,10 @@ name: adoGEM Triple Scan
 
 on:
   schedule:
-    - cron: '0 9 * * *'  # 1便：日本18:00
-    - cron: '0 12 * * *' # 2便：日本21:00
-    - cron: '0 15 * * *' # 3便：日本00:00
-  workflow_dispatch:
+    - cron: '0 9 * * *'   # 日本時間 18:00 (1300-4000担当)
+    - cron: '0 12 * * *'  # 日本時間 21:00 (4001-7000担当)
+    - cron: '0 15 * * *'  # 日本時間 00:00 (7001-10000担当)
+  workflow_dispatch:      # 手動実行ボタンも残す
 
 jobs:
   build:
