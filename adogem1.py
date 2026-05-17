@@ -16,8 +16,11 @@ def analyze_stock(symbol):
         stock = yf.Ticker(ticker)
         df = stock.history(period="6mo", progress=False, timeout=10)
         
-        if df is None or df.empty or len(df) < 60:
-            return None
+        if df is None or df.empty:
+            return "NOT_FOUND"
+        
+        if len(df) < 60:
+            return "SHORT_DATA"
         
         if df['Volume'].iloc[-1] < 50000:
             return "SKIP"
@@ -43,8 +46,9 @@ def analyze_stock(symbol):
         if close >= (max_100 * 0.95): return "SKIP"
 
         return f"■ 銘柄コード: {symbol} | 終値: {int(close)}円"
-    except:
-        return None
+    except Exception as e:
+        print(f"[DEBUG_ERROR] {symbol}: {e}")
+        return "ERROR"
 
 def main():
     if len(sys.argv) > 2:
@@ -58,22 +62,27 @@ def main():
     
     all_results = []
     error_count = 0
+    not_found_count = 0
+    short_data_count = 0
+    skip_count = 0
     
     for i in range(start_range, end_range):
         res = analyze_stock(str(i))
-        if res is None:
+        if res == "ERROR":
             error_count += 1
+        elif res == "NOT_FOUND":
+            not_found_count += 1
+        elif res == "SHORT_DATA":
+            short_data_count += 1
         elif res == "SKIP":
-            pass
+            skip_count += 1
         else:
             all_results.append(res)
             print(f"[DETECTED] {res}")
         time.sleep(0.15)
 
     total_count = end_range - start_range
-    scanned_count = total_count - error_count
-    match_count = len(all_results)
-    skip_count = scanned_count - match_count
+    scanned_count = total_count - error_count - not_found_count - short_data_count
 
     if all_results:
         subject = f"🔔【重要】選定銘柄の検出報告 ({start_range}-{end_range})"
@@ -83,7 +92,9 @@ def main():
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"総スキャン対象 : {total_count} 銘柄\n"
             f"正常精査銘柄数 : {scanned_count} 銘柄\n"
-            f"エラー等で精査できず : {error_count} 銘柄\n"
+            f"存在しない銘柄（欠番）: {not_found_count} 銘柄\n"
+            f"期間不足銘柄数 : {short_data_count} 銘柄\n"
+            f"通信等エラー数 : {error_count} 銘柄\n"
             f"条件非合致（精査無し）: {skip_count} 銘柄\n\n"
             "以下の銘柄において、設定された全条件の合致を確認しました。\n\n"
             + "\n".join(all_results) + "\n\n"
@@ -97,7 +108,9 @@ def main():
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"総スキャン対象 : {total_count} 銘柄\n"
             f"正常精査銘柄数 : {scanned_count} 銘柄\n"
-            f"エラー等で精査できず : {error_count} 銘柄\n"
+            f"存在しない銘柄（欠番）: {not_found_count} 銘柄\n"
+            f"期間不足銘柄数 : {short_data_count} 銘柄\n"
+            f"通信等エラー数 : {error_count} 銘柄\n"
             f"条件非合致（精査無し）: {skip_count} 銘柄\n\n"
             f"結果：精査完了 {scanned_count} 銘柄のうち、条件に合致する銘柄（精査無し）は検出されませんでした。\n"
         )
