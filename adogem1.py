@@ -14,7 +14,7 @@ def analyze_stock(symbol):
     try:
         ticker = f"{symbol}.T"
         stock = yf.Ticker(ticker)
-        df = stock.history(period="6mo", progress=False, timeout=10)
+        df = stock.history(period="6mo", timeout=10)
         
         if df is None or df.empty:
             return "NOT_FOUND"
@@ -59,7 +59,8 @@ def main():
         start_range = int(sys.argv[1])
         end_range = int(sys.argv[2])
     else:
-        start_range = 1300
+        # 夜間枠のデフォルト開始を7001から7003に変更
+        start_range = 7003
         end_range = 10000
     
     print(f"--- adoGEM Strategy Scanner Running ({start_range}-{end_range}) ---")
