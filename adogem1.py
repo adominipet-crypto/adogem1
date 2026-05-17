@@ -10,6 +10,20 @@ import sys
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
+# 条件ごとの通過カウンター
+stats = {
+    "total_fetched": 0,
+    "pass_volume": 0,
+    "pass_kahanshin": 0,
+    "pass_tame": 0,
+    "pass_ma60_up": 0,
+    "pass_new_high": 0,
+    "pass_ceiling_avoid": 0,
+    "★PPP": 0,
+    "★PPP(Short)": 0,
+    "normal_detect": 0
+}
+
 def analyze_stock(symbol):
     try:
         ticker = f"{symbol}.T"
@@ -22,8 +36,12 @@ def analyze_stock(symbol):
         if len(df) < 60:
             return "SHORT_DATA"
         
+        stats["total_fetched"] += 1
+
+        # 1. 出来高フィルター
         if df['Volume'].iloc[-1] < 50000:
             return "SKIP"
+        stats["pass_volume"] += 1
 
         df['MA5'] = df['Close'].rolling(window=5).mean()
         df['MA20'] = df['Close'].rolling(window=20).mean()
@@ -47,21 +65,39 @@ def analyze_stock(symbol):
         ma300_today = today['MA300']
         ma60_yest = yest['MA60']
 
+        # 2. 下半身 ＆ 当日陽線
         if not (open_p < ma5_today < close) or close <= open_p: return "SKIP" 
+        stats["pass_kahanshin"] += 1
+
+        # 3. 2営業日前の「溜め」判定
         if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
+        stats["pass_tame"] += 1
+
+        # 4. 中期（60日線）右肩上がり
         if ma60_today <= ma60_yest: return "SKIP" 
+        stats["pass_ma60_up"] += 1
+
+        # 5. 短期的な強さ（5日新高値）
         recent_high = df['High'].iloc[-6:-1].max()
         if close < recent_high: return "SKIP"
+        stats["pass_new_high"] += 1
+
+        # 6. 天井圏の回避フィルター
         max_100 = df['High'].iloc[-100:].max()
         if close >= (max_100 * 0.95): return "SKIP"
+        stats["pass_ceiling_avoid"] += 1
 
+        # PPP判定
         if ma300_today is not None:
             if (ma5_today > ma20_today > ma60_today > ma100_today > ma300_today):
+                stats["★PPP"] += 1
                 return f"★PPP ■ 銘柄コード: {symbol} | 終値: {int(close)}円"
         else:
             if (ma5_today > ma20_today > ma60_today > ma100_today):
+                stats["★PPP(Short)"] += 1
                 return f"★PPP(Short) ■ 銘柄コード: {symbol} | 終値: {int(close)}円"
 
+        stats["normal_detect"] += 1
         return f"■ 銘柄コード: {symbol} | 終値: {int(close)}円"
 
     except Exception as e:
@@ -83,7 +119,6 @@ def get_target_symbols(start, end):
         df_jpx['コード'] = df_jpx['コード'].astype(str)
         df_jpx['市場・商品区分'] = df_jpx['市場・商品区分'].astype(str)
         
-        # ETF、REIT、インフラファンド、新株予約権などを完全に除外し、個別株（内国株式）のみに絞り込む
         df_stocks = df_jpx[df_jpx['市場・商品区分'].str.contains('内国株式')]
         
         def filter_range(code):
@@ -132,6 +167,21 @@ def main():
 
     scanned_count = total_count - error_count - not_found_count - short_data_count
 
+    # 条件ごとの通過レポート文字列の作成
+    cond_report = (
+        "【条件ごとの通過銘柄数】\n"
+        f" 1. 出来高フィルター (5万株以上) : {stats['pass_volume']} 銘柄 / 残り\n"
+        f" 2. 下半身 ＆ 当日陽線           : {stats['pass_kahanshin']} 銘柄 / 残り\n"
+        f" 3. 2営業日前「溜め」判定        : {stats['pass_tame']} 銘柄 / 残り\n"
+        f" 4. 60日移動平均線 右肩上がり    : {stats['pass_ma60_up']} 銘柄 / 残り\n"
+        f" 5. 5日新高値更新                : {stats['pass_new_high']} 銘柄 / 残り\n"
+        f" 6. 天井圏回避 (100日高値95%未満): {stats['pass_ceiling_avoid']} 銘柄 / 最終選定\n\n"
+        "【選定内訳】\n"
+        f"  - ★PPP 合致       : {stats['★PPP']} 銘柄\n"
+        f"  - ★PPP(Short) 合致: {stats['★PPP(Short)']} 銘柄\n"
+        f"  - 通常選定 合致    : {stats['normal_detect']} 銘柄\n"
+    )
+
     if all_results:
         subject = f"🔔【重要】選定銘柄の検出報告 ({start_range}-{end_range})"
         body = (
@@ -144,6 +194,7 @@ def main():
             f"期間不足銘柄数 : {short_data_count} 銘柄\n"
             f"通信等エラー数 : {error_count} 銘柄\n"
             f"条件非合致（精査無し）: {skip_count} 銘柄\n\n"
+            f"{cond_report}\n"
             "以下の銘柄において、設定された全条件の合致を確認しました。\n"
             "（★PPPマーク付きは超強力トレンド銘柄です）\n\n"
             + "\n".join(all_results) + "\n\n"
@@ -161,7 +212,8 @@ def main():
             f"期間不足銘柄数 : {short_data_count} 銘柄\n"
             f"通信等エラー数 : {error_count} 銘柄\n"
             f"条件非合致（精査無し）: {skip_count} 銘柄\n\n"
-            f"結果：精査完了 {scanned_count} 銘柄のうち、条件に合致する銘柄（精査無し）は検出されませんでした。\n"
+            f"{cond_report}\n"
+            f"結果：精査完了 {scanned_count} 銘柄のうち、条件に合致する銘柄は検出されませんでした。\n"
         )
 
     msg = MIMEMultipart()
