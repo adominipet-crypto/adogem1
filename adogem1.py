@@ -81,12 +81,16 @@ def get_target_symbols(start, end):
         df_jpx = df_jpx[1:]
         
         df_jpx['コード'] = df_jpx['コード'].astype(str)
+        df_jpx['市場・商品区分'] = df_jpx['市場・商品区分'].astype(str)
+        
+        # ETF、REIT、インフラファンド、新株予約権などを完全に除外し、個別株（内国株式）のみに絞り込む
+        df_stocks = df_jpx[df_jpx['市場・商品区分'].str.contains('内国株式')]
         
         def filter_range(code):
             prefix = code[:4]
             return str(start) <= prefix < str(end)
             
-        targets = df_jpx[df_jpx['コード'].apply(filter_range)]['コード'].unique().tolist()
+        targets = df_stocks[df_stocks['コード'].apply(filter_range)]['コード'].unique().tolist()
         return sorted(targets)
     except Exception as e:
         print(f"JPX銘柄リスト取得失敗、連番フォールバックを実行: {e}")
