@@ -14,20 +14,25 @@ def analyze_stock(symbol):
     try:
         ticker = f"{symbol}.T"
         stock = yf.Ticker(ticker)
-        df = stock.history(period="6mo", timeout=10)
+        # 300日線を計算するため、取得期間を2年に延長
+        df = stock.history(period="2y", timeout=10)
         
         if df is None or df.empty:
             return "NOT_FOUND"
         
-        if len(df) < 60:
+        # 300日分のデータがあるかチェック
+        if len(df) < 300:
             return "SHORT_DATA"
         
         if df['Volume'].iloc[-1] < 50000:
             return "SKIP"
 
+        # 各移動平均線の計算
         df['MA5'] = df['Close'].rolling(window=5).mean()
         df['MA20'] = df['Close'].rolling(window=20).mean()
         df['MA60'] = df['Close'].rolling(window=60).mean()
+        df['MA100'] = df['Close'].rolling(window=100).mean()
+        df['MA300'] = df['Close'].rolling(window=300).mean()
         
         today = df.iloc[-1]
         yest = df.iloc[-2]
@@ -35,8 +40,13 @@ def analyze_stock(symbol):
         
         close, open_p = today['Close'], today['Open']
         ma5_today = today['MA5']
-        ma60_today, ma60_yest = today['MA60'], yest['MA60']
+        ma20_today = today['MA20']
+        ma60_today = today['MA60']
+        ma100_today = today['MA100']
+        ma300_today = today['MA300']
+        ma60_yest = yest['MA60']
 
+        # 1. 基本テクニカル条件（下半身・陽線・溜め・60MA右肩上がり・5日新高値・天井回避）
         if not (open_p < ma5_today < close) or close <= open_p: return "SKIP" 
         if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
         if ma60_today <= ma60_yest: return "SKIP" 
@@ -45,7 +55,12 @@ def analyze_stock(symbol):
         max_100 = df['High'].iloc[-100:].max()
         if close >= (max_100 * 0.95): return "SKIP"
 
-        return f"■ 銘柄コード: {symbol} | 終値: {int(close)}円"
+        # 2. 5本のPPP並び順判定 (5 > 20 > 60 > 100 > 300)
+        if (ma5_today > ma20_today > ma60_today > ma100_today > ma300_today):
+            return f"★PPP ■ 銘柄コード: {symbol} | 終値: {int(close)}円"
+        else:
+            return f"■ 銘柄コード: {symbol} | 終値: {int(close)}円"
+
     except Exception as e:
         err_msg = str(e)
         if "404" in err_msg or "Not Found" in err_msg or "not found" in err_msg or "No data found" in err_msg:
@@ -59,7 +74,6 @@ def main():
         start_range = int(sys.argv[1])
         end_range = int(sys.argv[2])
     else:
-        # 夜間枠のデフォルト開始を7001から7003に変更
         start_range = 7003
         end_range = 10000
     
@@ -101,7 +115,8 @@ def main():
             f"期間不足銘柄数 : {short_data_count} 銘柄\n"
             f"通信等エラー数 : {error_count} 銘柄\n"
             f"条件非合致（精査無し）: {skip_count} 銘柄\n\n"
-            "以下の銘柄において、設定された全条件の合致を確認しました。\n\n"
+            "以下の銘柄において、設定された全条件の合致を確認しました。\n"
+            "（★PPPマーク付きは超強力トレンド銘柄です）\n\n"
             + "\n".join(all_results) + "\n\n"
             "※本メールはシステムによる自動精査の結果を通知するものです。\n"
         )
