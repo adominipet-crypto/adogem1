@@ -17,6 +17,8 @@ stats = {
     "pass_kahanshin": 0,
     "pass_tame": 0,
     "pass_ma60_up": 0,
+    "pass_trend_align": 0,  # 新設
+    "pass_upper_shadow": 0, # 新設
     "pass_new_high": 0,
     "pass_ceiling_avoid": 0,
     "★PPP": 0,
@@ -33,7 +35,7 @@ def analyze_stock(symbol):
         if df is None or df.empty:
             return "NOT_FOUND"
         
-        if len(df) < 60:
+        if len(df) < 100: # 100日線の傾きを見るため最低100日
             return "SHORT_DATA"
         
         stats["total_fetched"] += 1
@@ -57,16 +59,21 @@ def analyze_stock(symbol):
         yest = df.iloc[-2]
         yest2 = df.iloc[-3]
         
-        close, open_p = today['Close'], today['Open']
+        close, open_p, high = today['Close'], today['Open'], today['High']
         ma5_today = today['MA5']
         ma20_today = today['MA20']
         ma60_today = today['MA60']
         ma100_today = today['MA100']
         ma300_today = today['MA300']
         ma60_yest = yest['MA60']
+        ma100_yest = yest['MA100']
 
-        # 2. 下半身 ＆ 当日陽線
-        if not (open_p < ma5_today < close) or close <= open_p: return "SKIP" 
+        # 2. 【強化版】下半身 ＆ 当日陽線
+        # 条件A: 陽線であり、終値が5日線の上にあること
+        if not (ma5_today < close) or close <= open_p: return "SKIP" 
+        # 条件B: ローソク足の実体の50%以上が5日線より上に出ていること（ダマシ排除）
+        body_midpoint = open_p + (close - open_p) * 0.5
+        if ma5_today > body_midpoint: return "SKIP"
         stats["pass_kahanshin"] += 1
 
         # 3. 2営業日前「溜め」判定
@@ -77,15 +84,26 @@ def analyze_stock(symbol):
         if ma60_today <= ma60_yest: return "SKIP" 
         stats["pass_ma60_up"] += 1
 
-        # 5. 短期的な強さ（5日新高値） --> 一つ手前で通過判定とし、計算はスキップ
-        stats["pass_new_high"] += 1
-        # recent_high = df['High'].iloc[-6:-1].max()
-        # if close < recent_high: return "SKIP"
+        # 新設: 長期トレンド同期（100日線が右肩下がりの「見せかけの上昇」を排除）
+        if ma100_today <= ma100_yest: return "SKIP"
+        stats["pass_trend_align"] += 1
 
-        # 6. 天井圏の回避フィルター --> 一つ手前で通過判定とし、計算はスキップ
+        # 新設: 上ヒゲフィルター（上ヒゲが実体の1.5倍以上長ければ上値が重いとみなし除外）
+        body_length = close - open_p
+        upper_shadow_length = high - close
+        if body_length > 0:
+            if upper_shadow_length >= (body_length * 1.5): return "SKIP"
+        stats["pass_upper_shadow"] += 1
+
+        # 5. 短期的な強さ（5日新高値）
+        recent_high = df['High'].iloc[-6:-1].max()
+        if close < recent_high: return "SKIP"
+        stats["pass_new_high"] += 1
+
+        # 6. 【復活・調整版】天井圏の回避フィルター（過去100日高値の97%以上は除外）
+        max_100 = df['High'].iloc[-100:].max()
+        if close >= (max_100 * 0.97): return "SKIP"
         stats["pass_ceiling_avoid"] += 1
-        # max_100 = df['High'].iloc[-100:].max()
-        # if close >= (max_100 * 0.95): return "SKIP"
 
         # PPP判定
         if ma300_today is not None:
@@ -171,11 +189,13 @@ def main():
     cond_report = (
         "【条件ごとの通過銘柄数】\n"
         f" 1. 出来高フィルター (5万株以上) : {stats['pass_volume']} 銘柄 / 残り\n"
-        f" 2. 下半身 ＆ 当日陽線           : {stats['pass_kahanshin']} 銘柄 / 残り\n"
+        f" 2. 下半身(実体50%上) ＆ 当日陽線 : {stats['pass_kahanshin']} 銘柄 / 残り\n"
         f" 3. 2営業日前「溜め」判定        : {stats['pass_tame']} 銘柄 / 残り\n"
         f" 4. 60日移動平均線 右肩上がり    : {stats['pass_ma60_up']} 銘柄 / 残り\n"
-        f" 5. 5日新高値更新 [一時停止中]    : {stats['pass_new_high']} 銘柄 / 残り\n"
-        f" 6. 天井圏回避   [一時停止中]    : {stats['pass_ceiling_avoid']} 銘柄 / 最終選定\n\n"
+        f" [新] 長期トレンド同期(100MA上昇) : {stats['pass_trend_align']} 銘柄 / 残り\n"
+        f" [新] 上ヒゲフィルター (1.5倍未満): {stats['pass_upper_shadow']} 銘柄 / 残り\n"
+        f" 5. 5日新高値更新                : {stats['pass_new_high']} 銘柄 / 残り\n"
+        f" 6. 天井圏回避 (100日高値97%未満): {stats['pass_ceiling_avoid']} 銘柄 / 最終選定\n\n"
         "【選定内訳】\n"
         f"  - ★PPP 合致       : {stats['★PPP']} 銘柄\n"
         f"  - ★PPP(Short) 合致: {stats['★PPP(Short)']} 銘柄\n"
@@ -186,7 +206,7 @@ def main():
         subject = f"🔔【重要】選定銘柄の検出報告 ({start_range}-{end_range})"
         body = (
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "   adoGEM 戦略フィルター：選定銘柄レポート (5,6除外)\n"
+            "   adoGEM 戦略フィルター：選定銘柄レポート (完全版)\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"総スキャン対象 : {total_count} 銘柄\n"
             f"正常精査銘柄数 : {scanned_count} 銘柄\n"
@@ -204,7 +224,7 @@ def main():
         subject = f"📊 スキャン完了通知 ({start_range}-{end_range})"
         body = (
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "   adoGEM 戦略フィルター：定期スキャン完了 (5,6除外)\n"
+            "   adoGEM 戦略フィルター：定期スキャン完了 (完全版)\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"総スキャン対象 : {total_count} 銘柄\n"
             f"正常精査銘柄数 : {scanned_count} 銘柄\n"
