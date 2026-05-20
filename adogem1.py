@@ -10,17 +10,29 @@ import sys
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
-# 条件ごとの通過カウンター
 stats = {
     "total_fetched": 0,
     "pass_volume": 0,
     "pass_kahanshin": 0,
+    
     "pass_tame": 0,
+    "list_tame": [],
+    
     "pass_ma60_up": 0,
-    "pass_trend_align": 0,  # 新設
-    "pass_upper_shadow": 0, # 新設
+    "list_ma60_up": [],
+    
+    "pass_trend_align": 0,
+    "list_trend_align": [],
+    
+    "pass_upper_shadow": 0,
+    "list_upper_shadow": [],
+    
     "pass_new_high": 0,
+    "list_new_high": [],
+    
     "pass_ceiling_avoid": 0,
+    "list_ceiling_avoid": [],
+    
     "★PPP": 0,
     "★PPP(Short)": 0,
     "normal_detect": 0
@@ -35,7 +47,7 @@ def analyze_stock(symbol):
         if df is None or df.empty:
             return "NOT_FOUND"
         
-        if len(df) < 100: # 100日線の傾きを見るため最低100日
+        if len(df) < 100:
             return "SHORT_DATA"
         
         stats["total_fetched"] += 1
@@ -68,10 +80,16 @@ def analyze_stock(symbol):
         ma60_yest = yest['MA60']
         ma100_yest = yest['MA100']
 
-        # 2. 【強化版】下半身 ＆ 当日陽線
-        # 条件A: 陽線であり、終値が5日線の上にあること
+        ppp_label = ""
+        if ma300_today is not None and (ma5_today > ma20_today > ma60_today > ma100_today > ma300_today):
+            ppp_label = "★PPP "
+        elif ma300_today is None and (ma5_today > ma20_today > ma60_today > ma100_today):
+            ppp_label = "★PPP(Short) "
+            
+        stock_text = f"{ppp_label}■ {symbol} | {int(close)}円"
+
+        # 2. 下半身 ＆ 当日陽線
         if not (ma5_today < close) or close <= open_p: return "SKIP" 
-        # 条件B: ローソク足の実体の50%以上が5日線より上に出ていること（ダマシ排除）
         body_midpoint = open_p + (close - open_p) * 0.5
         if ma5_today > body_midpoint: return "SKIP"
         stats["pass_kahanshin"] += 1
@@ -79,51 +97,45 @@ def analyze_stock(symbol):
         # 3. 2営業日前「溜め」判定
         if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
         stats["pass_tame"] += 1
+        stats["list_tame"].append(f"  3 {stock_text}")
 
         # 4. 中期（60日線）右肩上がり
         if ma60_today <= ma60_yest: return "SKIP" 
         stats["pass_ma60_up"] += 1
+        stats["list_ma60_up"].append(f"  4 {stock_text}")
 
-        # 新設: 長期トレンド同期（100日線が右肩下がりの「見せかけの上昇」を排除）
+        # 長期トレンド同期
         if ma100_today <= ma100_yest: return "SKIP"
         stats["pass_trend_align"] += 1
+        stats["list_trend_align"].append(f"  長 {stock_text}")
 
-        # 新設: 上ヒゲフィルター（上ヒゲが実体の1.5倍以上長ければ上値が重いとみなし除外）
+        # 上ヒゲ選別
         body_length = close - open_p
         upper_shadow_length = high - close
         if body_length > 0:
             if upper_shadow_length >= (body_length * 1.5): return "SKIP"
         stats["pass_upper_shadow"] += 1
+        stats["list_upper_shadow"].append(f"  ヒ {stock_text}")
 
-        # 5. 短期的な強さ（5日新高値）
+        # 5. 5日新高値更新
         recent_high = df['High'].iloc[-6:-1].max()
         if close < recent_high: return "SKIP"
         stats["pass_new_high"] += 1
+        stats["list_new_high"].append(f"  5 {stock_text}")
 
-        # 6. 【復活・調整版】天井圏の回避フィルター（過去100日高値の97%以上は除外）
+        # 6. 天井圏の回避フィルター
         max_100 = df['High'].iloc[-100:].max()
         if close >= (max_100 * 0.97): return "SKIP"
         stats["pass_ceiling_avoid"] += 1
+        stats["list_ceiling_avoid"].append(f"  最終 {stock_text}")
 
-        # PPP判定
-        if ma300_today is not None:
-            if (ma5_today > ma20_today > ma60_today > ma100_today > ma300_today):
-                stats["★PPP"] += 1
-                return f"★PPP ■ 銘柄コード: {symbol} | 終値: {int(close)}円"
-        else:
-            if (ma5_today > ma20_today > ma60_today > ma100_today):
-                stats["★PPP(Short)"] += 1
-                return f"★PPP(Short) ■ 銘柄コード: {symbol} | 終値: {int(close)}円"
+        if "★PPP " in ppp_label: stats["★PPP"] += 1
+        elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
+        else: stats["normal_detect"] += 1
 
-        stats["normal_detect"] += 1
-        return f"■ 銘柄コード: {symbol} | 終値: {int(close)}円"
+        return stock_text
 
     except Exception as e:
-        err_msg = str(e)
-        if "404" in err_msg or "Not Found" in err_msg or "not found" in err_msg or "No data found" in err_msg:
-            return "NOT_FOUND"
-        
-        print(f"[DEBUG_ERROR] {symbol}: {err_msg}")
         return "ERROR"
 
 def get_target_symbols(start, end):
@@ -133,124 +145,53 @@ def get_target_symbols(start, end):
         df_jpx = tables[0]
         df_jpx.columns = df_jpx.iloc[0]
         df_jpx = df_jpx[1:]
-        
         df_jpx['コード'] = df_jpx['コード'].astype(str)
         df_jpx['市場・商品区分'] = df_jpx['市場・商品区分'].astype(str)
-        
         df_stocks = df_jpx[df_jpx['市場・商品区分'].str.contains('内国株式')]
-        
-        def filter_range(code):
-            prefix = code[:4]
-            return str(start) <= prefix < str(end)
-            
-        targets = df_stocks[df_stocks['コード'].apply(filter_range)]['コード'].unique().tolist()
-        return sorted(targets)
+        def filter_range(code): return str(start) <= code[:4] < str(end)
+        return sorted(df_stocks[df_stocks['コード'].apply(filter_range)]['コード'].unique().tolist())
     except Exception as e:
-        print(f"JPX銘柄リスト取得失敗、連番フォールバックを実行: {e}")
         return [str(i) for i in range(start, end)]
 
 def main():
-    if len(sys.argv) > 2:
-        start_range = int(sys.argv[1])
-        end_range = int(sys.argv[2])
-    else:
-        start_range = 7003
-        end_range = 10000
+    if len(sys.argv) > 2: start_range, end_range = int(sys.argv[1]), int(sys.argv[2])
+    else: start_range, end_range = 7003, 10000
     
-    print(f"--- Fetching Master Stock List from JPX ({start_range}-{end_range}) ---")
     symbols = get_target_symbols(start_range, end_range)
     total_count = len(symbols)
-    print(f"--- adoGEM Strategy Scanner Running for {total_count} valid stocks ---")
     
     all_results = []
-    error_count = 0
-    not_found_count = 0
-    short_data_count = 0
-    skip_count = 0
+    error_count = not_found_count = short_data_count = skip_count = 0
     
     for symbol in symbols:
         res = analyze_stock(symbol)
-        if res == "ERROR":
-            error_count += 1
-        elif res == "NOT_FOUND":
-            not_found_count += 1
-        elif res == "SHORT_DATA":
-            short_data_count += 1
-        elif res == "SKIP":
-            skip_count += 1
-        else:
-            all_results.append(res)
-            print(f"[DETECTED] {res}")
+        if res == "ERROR": error_count += 1
+        elif res == "NOT_FOUND": not_found_count += 1
+        elif res == "SHORT_DATA": short_data_count += 1
+        elif res == "SKIP": skip_count += 1
+        else: all_results.append(res)
         time.sleep(0.50)
 
     scanned_count = total_count - error_count - not_found_count - short_data_count
 
-    # 条件ごとの通過レポート文字列の作成
+    def make_list_str(target_list):
+        return "\n".join(target_list) + "\n" if target_list else ""
+
+    # 📊 無駄を削ぎ落とした箇条書きレイアウト
     cond_report = (
-        "【条件ごとの通過銘柄数】\n"
-        f" 1. 出来高フィルター (5万株以上) : {stats['pass_volume']} 銘柄 / 残り\n"
-        f" 2. 下半身(実体50%上) ＆ 当日陽線 : {stats['pass_kahanshin']} 銘柄 / 残り\n"
-        f" 3. 2営業日前「溜め」判定        : {stats['pass_tame']} 銘柄 / 残り\n"
-        f" 4. 60日移動平均線 右肩上がり    : {stats['pass_ma60_up']} 銘柄 / 残り\n"
-        f" [新] 長期トレンド同期(100MA上昇) : {stats['pass_trend_align']} 銘柄 / 残り\n"
-        f" [新] 上ヒゲフィルター (1.5倍未満): {stats['pass_upper_shadow']} 銘柄 / 残り\n"
-        f" 5. 5日新高値更新                : {stats['pass_new_high']} 銘柄 / 残り\n"
-        f" 6. 天井圏回避 (100日高値97%未満): {stats['pass_ceiling_avoid']} 銘柄 / 最終選定\n\n"
-        "【選定内訳】\n"
-        f"  - ★PPP 合致       : {stats['★PPP']} 銘柄\n"
-        f"  - ★PPP(Short) 合致: {stats['★PPP(Short)']} 銘柄\n"
-        f"  - 通常選定 合致    : {stats['normal_detect']} 銘柄\n"
-    )
-
-    if all_results:
-        subject = f"🔔【重要】選定銘柄の検出報告 ({start_range}-{end_range})"
-        body = (
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "   adoGEM 戦略フィルター：選定銘柄レポート (完全版)\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"総スキャン対象 : {total_count} 銘柄\n"
-            f"正常精査銘柄数 : {scanned_count} 銘柄\n"
-            f"存在しない銘柄（欠番）: {not_found_count} 銘柄\n"
-            f"期間不足銘柄数 : {short_data_count} 銘柄\n"
-            f"通信等エラー数 : {error_count} 銘柄\n"
-            f"条件非合致（精査無し）: {skip_count} 銘柄\n\n"
-            f"{cond_report}\n"
-            "以下の銘柄において、設定された全条件の合致を確認しました。\n"
-            "（★PPPマーク付きは超強力トレンド銘柄です）\n\n"
-            + "\n".join(all_results) + "\n\n"
-            "※本メールはシステムによる自動精査の結果を通知するものです。\n"
-        )
-    else:
-        subject = f"📊 スキャン完了通知 ({start_range}-{end_range})"
-        body = (
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "   adoGEM 戦略フィルター：定期スキャン完了 (完全版)\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"総スキャン対象 : {total_count} 銘柄\n"
-            f"正常精査銘柄数 : {scanned_count} 銘柄\n"
-            f"存在しない銘柄（欠番）: {not_found_count} 銘柄\n"
-            f"期間不足銘柄数 : {short_data_count} 銘柄\n"
-            f"通信等エラー数 : {error_count} 銘柄\n"
-            f"条件非合致（精査無し）: {skip_count} 銘柄\n\n"
-            f"{cond_report}\n"
-            f"結果：精査完了 {scanned_count} 銘柄のうち、条件に合致する銘柄は検出されませんでした。\n"
-        )
-
-    msg = MIMEMultipart()
-    msg['From'] = SENDER_EMAIL
-    msg['To'] = SENDER_EMAIL
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
-    
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-        print("報告メールの送信が完了しました。")
-    except Exception as e:
-        print(f"メール送信エラー: {e}")
-
-if __name__ == "__main__":
-    main()
+        "【通過銘柄】\n"
+        f" 1. 出来高選別 (5万株) : {stats['pass_volume']}\n"
+        f" 2. 下半身(実体50%) ＆ 当日陽線 : {stats['pass_kahanshin']}\n"
+        f" 3. 2営業日前「溜め」判定 : {stats['pass_tame']}\n"
+        f"{make_list_str(stats['list_tame'])}"
+        f" 4. 60日移動平均線 右肩上がり : {stats['pass_ma60_up']}\n"
+        f"{make_list_str(stats['list_ma60_up'])}"
+        f" [新] 長期トレンド同期(100MA上昇) : {stats['pass_trend_align']}\n"
+        f"{make_list_str(stats['list_trend_align'])}"
+        f" [新] 上ヒゲ選別(1.5倍未満) : {stats['pass_upper_shadow']}\n"
+        f"{make_list_str(stats['list_upper_shadow'])}"
+        f" 5. 5日新高値更新 : {stats['pass_new_high']}\n"
+        f"{make_list_str(stats['list_new_high'])}"
+        f" 6. 天井圏回避 (100日高値97%未満) : {stats['pass_ceiling_avoid']}\n"
+        f"{make_list_str(stats['list_ceiling_avoid'])}\n"
+        "
