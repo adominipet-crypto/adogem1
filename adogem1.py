@@ -177,7 +177,7 @@ def main():
     def make_list_str(target_list):
         return "\n".join(target_list) + "\n" if target_list else ""
 
-    # 📊 無駄を削ぎ落とした箇条書きレイアウト
+    # 📊 バグの原因となっていた文字列結合部分を修正・最適化
     cond_report = (
         "【通過銘柄】\n"
         f" 1. 出来高選別 (5万株) : {stats['pass_volume']}\n"
@@ -194,4 +194,39 @@ def main():
         f"{make_list_str(stats['list_new_high'])}"
         f" 6. 天井圏回避 (100日高値97%未満) : {stats['pass_ceiling_avoid']}\n"
         f"{make_list_str(stats['list_ceiling_avoid'])}\n"
-        "
+        "【選定内訳】\n"
+        f"  - ★PPP 合致       : {stats['★PPP']} 銘柄\n"
+        f"  - ★PPP(Short) 合致: {stats['★PPP(Short)']} 銘柄\n"
+        f"  - 通常選定 合致    : {stats['normal_detect']} 銘柄\n"
+    )
+
+    subject = f"📊 adoGEM 選定報告 ({start_range}-{end_range}) 合致:{len(all_results)}件"
+    body = (
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "   adoGEM 戦略フィルター：選定銘柄レポート\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"総スキャン対象 : {total_count}\n"
+        f"正常精査銘柄数 : {scanned_count}\n\n"
+        f"{cond_report}\n"
+        "以下の銘柄において、設定された全条件の合致を確認。\n"
+        "（★PPPマーク付きは超強力トレンド銘柄）\n"
+    )
+
+    msg = MIMEMultipart()
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = SENDER_EMAIL
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+    
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print("報告メールの送信が完了しました。")
+    except Exception as e:
+        print(f"メール送信エラー: {e}")
+
+if __name__ == "__main__":
+    main()
