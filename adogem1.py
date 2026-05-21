@@ -86,7 +86,7 @@ def analyze_stock(symbol):
         elif ma300_today is None and (ma5_today > ma20_today > ma60_today > ma100_today):
             ppp_label = "★PPP(Short) "
             
-        stock_text = f"{ppp_label}■ {symbol} | {int(close)}円"
+        stock_text = f"■ {symbol} | {int(close)}円"
 
         # 2. 下半身 ＆ 当日陽線
         if not (ma5_today < close) or close <= open_p: return "SKIP" 
@@ -97,17 +97,17 @@ def analyze_stock(symbol):
         # 3. 2営業日前「溜め」判定
         if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
         stats["pass_tame"] += 1
-        stats["list_tame"].append(f"  3 {stock_text}")
+        stats["list_tame"].append(f"  3 {ppp_label}{stock_text}")
 
         # 4. 中期（60日線）右肩上がり
         if ma60_today <= ma60_yest: return "SKIP" 
         stats["pass_ma60_up"] += 1
-        stats["list_ma60_up"].append(f"  4 {stock_text}")
+        stats["list_ma60_up"].append(f"  4 {ppp_label}{stock_text}")
 
         # 長期トレンド同期
         if ma100_today <= ma100_yest: return "SKIP"
         stats["pass_trend_align"] += 1
-        stats["list_trend_align"].append(f"  長 {stock_text}")
+        stats["list_trend_align"].append(f"  長 {ppp_label}{stock_text}")
 
         # 上ヒゲ選別
         body_length = close - open_p
@@ -115,25 +115,25 @@ def analyze_stock(symbol):
         if body_length > 0:
             if upper_shadow_length >= (body_length * 1.5): return "SKIP"
         stats["pass_upper_shadow"] += 1
-        stats["list_upper_shadow"].append(f"  ヒ {stock_text}")
+        stats["list_upper_shadow"].append(f"  ヒ {ppp_label}{stock_text}")
 
         # 5. 5日新高値更新
         recent_high = df['High'].iloc[-6:-1].max()
         if close < recent_high: return "SKIP"
         stats["pass_new_high"] += 1
-        stats["list_new_high"].append(f"  5 {stock_text}")
+        stats["list_new_high"].append(f"  5 {ppp_label}{stock_text}")
 
         # 6. 天井圏の回避フィルター
         max_100 = df['High'].iloc[-100:].max()
         if close >= (max_100 * 0.97): return "SKIP"
         stats["pass_ceiling_avoid"] += 1
-        stats["list_ceiling_avoid"].append(f"  最終 {stock_text}")
+        stats["list_ceiling_avoid"].append(f"  最終 {ppp_label}{stock_text}")
 
         if "★PPP " in ppp_label: stats["★PPP"] += 1
         elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
         else: stats["normal_detect"] += 1
 
-        return stock_text
+        return f"{ppp_label}{stock_text}"
 
     except Exception as e:
         return "ERROR"
@@ -175,25 +175,35 @@ def main():
     scanned_count = total_count - error_count - not_found_count - short_data_count
 
     def make_list_str(target_list):
-        return "\n".join(target_list) + "\n" if target_list else ""
+        return "\n".join(target_list) + "\n\n" if target_list else "(該当なし)\n\n"
 
-    # 📊 バグの原因となっていた文字列結合部分を修正・最適化
+    # 📊 各条件の詳細リスト部分を後半へ独立して結合
+    detail_lists = (
+        "【3. 2営業日前「溜め」判定 銘柄】\n"
+        f"{make_list_str(stats['list_tame'])}"
+        "【4. 60日移動平均線 右肩上がり 銘柄】\n"
+        f"{make_list_str(stats['list_ma60_up'])}"
+        "【[新] 長期トレンド同期(100MA上昇) 銘柄】\n"
+        f"{make_list_str(stats['list_trend_align'])}"
+        "【[新] 上ヒゲ選別(1.5倍未満) 銘柄】\n"
+        f"{make_list_str(stats['list_upper_shadow'])}"
+        "【5. 5日新高値更新 銘柄】\n"
+        f"{make_list_str(stats['list_new_high'])}"
+        "【6. 天井圏回避 (100日高値97%未満) 銘柄】\n"
+        f"{make_list_str(stats['list_ceiling_avoid'])}"
+    )
+
+    # 📊 前半は数値一覧のみですっきり表示
     cond_report = (
         "【通過銘柄】\n"
         f" 1. 出来高選別 (5万株) : {stats['pass_volume']}\n"
         f" 2. 下半身(実体50%) ＆ 当日陽線 : {stats['pass_kahanshin']}\n"
         f" 3. 2営業日前「溜め」判定 : {stats['pass_tame']}\n"
-        f"{make_list_str(stats['list_tame'])}"
         f" 4. 60日移動平均線 右肩上がり : {stats['pass_ma60_up']}\n"
-        f"{make_list_str(stats['list_ma60_up'])}"
         f" [新] 長期トレンド同期(100MA上昇) : {stats['pass_trend_align']}\n"
-        f"{make_list_str(stats['list_trend_align'])}"
         f" [新] 上ヒゲ選別(1.5倍未満) : {stats['pass_upper_shadow']}\n"
-        f"{make_list_str(stats['list_upper_shadow'])}"
         f" 5. 5日新高値更新 : {stats['pass_new_high']}\n"
-        f"{make_list_str(stats['list_new_high'])}"
-        f" 6. 天井圏回避 (100日高値97%未満) : {stats['pass_ceiling_avoid']}\n"
-        f"{make_list_str(stats['list_ceiling_avoid'])}\n"
+        f" 6. 天井圏回避 (100日高値97%未満) : {stats['pass_ceiling_avoid']}\n\n"
         "【選定内訳】\n"
         f"  - ★PPP 合致       : {stats['★PPP']} 銘柄\n"
         f"  - ★PPP(Short) 合致: {stats['★PPP(Short)']} 銘柄\n"
@@ -208,6 +218,10 @@ def main():
         f"総スキャン対象 : {total_count}\n"
         f"正常精査銘柄数 : {scanned_count}\n\n"
         f"{cond_report}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "   各フィルター通過銘柄 詳細リスト\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{detail_lists}"
         "以下の銘柄において、設定された全条件の合致を確認。\n"
         "（★PPPマーク付きは超強力トレンド銘柄）\n"
     )
