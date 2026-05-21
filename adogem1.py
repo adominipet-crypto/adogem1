@@ -117,11 +117,12 @@ def analyze_stock(symbol):
         stats["pass_upper_shadow"] += 1
         stats["list_upper_shadow"].append(f"  ヒ {ppp_label}{stock_text}")
 
-        # 5. 5日新高値更新
+        # 🛑 【一時停止】 5. 5日新高値更新 (カウントとリスト追加のみ行い、SKIPせず通過させる)
         recent_high = df['High'].iloc[-6:-1].max()
-        if close < recent_high: return "SKIP"
-        stats["pass_new_high"] += 1
-        stats["list_new_high"].append(f"  5 {ppp_label}{stock_text}")
+        if close >= recent_high:
+            stats["pass_new_high"] += 1
+            stats["list_new_high"].append(f"  5 {ppp_label}{stock_text}")
+        # if close < recent_high: return "SKIP"  ← ここをコメントアウトして止めました
 
         # 6. 天井圏の回避フィルター
         max_100 = df['High'].iloc[-100:].max()
@@ -177,7 +178,6 @@ def main():
     def make_list_str(target_list):
         return "\n".join(target_list) + "\n\n" if target_list else "(該当なし)\n\n"
 
-    # 📊 各条件の詳細リスト部分を後半へ独立して結合
     detail_lists = (
         "【3. 2営業日前「溜め」判定 銘柄】\n"
         f"{make_list_str(stats['list_tame'])}"
@@ -187,13 +187,12 @@ def main():
         f"{make_list_str(stats['list_trend_align'])}"
         "【[新] 上ヒゲ選別(1.5倍未満) 銘柄】\n"
         f"{make_list_str(stats['list_upper_shadow'])}"
-        "【5. 5日新高値更新 銘柄】\n"
+        "【5. 5日新高値更新 銘柄 [※現在スキップ中]】\n"
         f"{make_list_str(stats['list_new_high'])}"
         "【6. 天井圏回避 (100日高値97%未満) 銘柄】\n"
         f"{make_list_str(stats['list_ceiling_avoid'])}"
     )
 
-    # 📊 前半は数値一覧のみですっきり表示
     cond_report = (
         "【通過銘柄】\n"
         f" 1. 出来高選別 (5万株) : {stats['pass_volume']}\n"
@@ -202,7 +201,7 @@ def main():
         f" 4. 60日移動平均線 右肩上がり : {stats['pass_ma60_up']}\n"
         f" [新] 長期トレンド同期(100MA上昇) : {stats['pass_trend_align']}\n"
         f" [新] 上ヒゲ選別(1.5倍未満) : {stats['pass_upper_shadow']}\n"
-        f" 5. 5日新高値更新 : {stats['pass_new_high']}\n"
+        f" 5. 5日新高値更新 : {stats['pass_new_high']} (※スキップ)\n"
         f" 6. 天井圏回避 (100日高値97%未満) : {stats['pass_ceiling_avoid']}\n\n"
         "【選定内訳】\n"
         f"  - ★PPP 合致       : {stats['★PPP']} 銘柄\n"
