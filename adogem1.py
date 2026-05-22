@@ -230,12 +230,12 @@ def main():
 
     # 📊 重複を含む詳細銘柄リスト（メールの下半分に配置）
     detail_lists = (
-        "【3. 2営業日前「溜め」判定 銘柄】\n" f"{make_list_str(stats['list_tame'])}"
-        "【4. 60日移動平均線 右肩上がり 銘柄】\n" f"{make_list_str(stats['list_ma60_up'])}"
-        "【[新] 長期トレンド同期(100MA上昇) 銘柄】\n" f"{make_list_str(stats['list_trend_align'])}"
-        "【[新] 上ヒゲ選別(1.5倍未満) 銘柄】\n" f"{make_list_str(stats['list_upper_shadow'])}"
-        "【5. 5日新高値更新 銘柄 [※現在スキップ中]】\n" f"{make_list_str(stats['list_new_high'])}"
-        "【6. 天井圏回避 (100日高値97%未満) 銘柄】\n" f"{make_list_str(stats['list_ceiling_avoid'])}"
+        "【3. 2日前「溜め」】\n" f"{make_list_str(stats['list_tame'])}"
+        "【4. 60日右肩上がり】\n" f"{make_list_str(stats['list_ma60_up'])}"
+        "【[新] 長期(100MA上昇)】\n" f"{make_list_str(stats['list_trend_align'])}"
+        "【[新] 上ヒゲ(1.5未満)】\n" f"{make_list_str(stats['list_upper_shadow'])}"
+        "【5. 5日新高値更新[※現在スキップ中]】\n" f"{make_list_str(stats['list_new_high'])}"
+        "【6. 天井圏(100日97%)】\n" f"{make_list_str(stats['list_ceiling_avoid'])}"
     )
 
     # 📊 各条件ごとの通過数値一覧（メールの上半分に配置）
