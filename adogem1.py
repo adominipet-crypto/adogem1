@@ -181,7 +181,7 @@ def analyze_stock(symbol):
         stats["pass_upper_shadow"] += 1
         stats["list_upper_shadow"].append(f"  ヒ {ppp_label}{stock_text}")
 
-        # 🛑 5日新高値はカウントのみでスキップさせない
+        # 🛑 5日新高値はカウントのみでスクロップさせない
         if close >= df['High'].iloc[-6:-1].max():
             stats["pass_new_high"] += 1
             stats["list_new_high"].append(f"  5 {ppp_label}{stock_text}")
@@ -228,7 +228,7 @@ def main():
 
     def make_list_str(target_list): return "\n".join(target_list) + "\n\n" if target_list else "(該当なし)\n\n"
 
-    # 📊 重複を含む詳細銘柄リスト（メールの下半分に配置）
+    # 📊 表示短縮化版の詳細銘柄リスト（メールの下半分に配置）
     detail_lists = (
         "【3. 2日前「溜め」】\n" f"{make_list_str(stats['list_tame'])}"
         "【4. 60日右肩上がり】\n" f"{make_list_str(stats['list_ma60_up'])}"
