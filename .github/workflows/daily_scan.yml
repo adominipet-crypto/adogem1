@@ -18,7 +18,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas pandas_datareader yfinance
+          pip install pandas pandas_datareader yfinance gspread oauth2client
       - name: Run Split Scan
         env:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
