@@ -23,6 +23,7 @@ jobs:
         env:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: |
           SCHEDULE="${{ github.event.schedule }}"
           if [[ "$SCHEDULE" == "0 9 * * *" ]]; then
