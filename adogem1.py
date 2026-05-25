@@ -48,13 +48,14 @@ def record_to_spreadsheet():
 def get_stock_data_fallback(symbol):
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.T?range=2y&interval=1d"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
         res = requests.get(url, headers=headers, timeout=15)
         if res.status_code != 200: return None
         result = res.json().get("chart", {}).get("result", [])
-        if not result: return None
+        if not result or result is None: return None
         quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
         timestamps = result[0].get("timestamp", [])
+        if not timestamps or not quotes.get("close", []): return None
         df = pd.DataFrame({
             "Open": quotes.get("open", []), "High": quotes.get("high", []),
             "Low": quotes.get("low", []), "Close": quotes.get("close", []), "Volume": quotes.get("volume", [])
@@ -146,22 +147,26 @@ def analyze_stock(symbol):
 def get_target_symbols(start, end):
     try:
         url = "https://www.jpx.co.jp/markets/statistics-options/data/files/data_j.xls"
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        # JPXのExcel取得にブラウザを偽装するヘッダーを追加
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}, timeout=15)
         df_jpx = pd.read_html(res.content)[0]
         df_jpx.columns = df_jpx.iloc[0]
         df_stocks = df_jpx[1:][df_jpx[1:]['市場・商品区分'].astype(str).str.contains('内国株式')]
-        return sorted(df_stocks[df_stocks['コード'].astype(str).apply(lambda c: str(start) <= c[:4] < str(end))]['コード'].astype(str).unique().tolist())
+        codes = sorted(df_stocks[df_stocks['コード'].astype(str).apply(lambda c: str(start) <= c[:4] < str(end))]['コード'].astype(str).unique().tolist())
+        if codes: return codes
+        raise Exception("No codes fetched")
     except:
+        # JPXが弾かれた場合は、1300から4000までの番号を自動で生成（安全装置）
         return [str(i) for i in range(start, end)]
 
 def main():
-    start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (7003, 10000)
+    start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 4000)
     symbols = get_target_symbols(start_range, end_range)
     all_results = []
     for symbol in symbols:
         res = analyze_stock(symbol)
         if res not in ["ERROR", "SKIP"]: all_results.append(res)
-        time.sleep(0.50)
+        time.sleep(0.1)  # 国内API用に少しウェイトを縮小
 
     update_yesterday_results()
     record_to_spreadsheet()
@@ -178,4 +183,18 @@ def main():
 
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
-    msg['To']
+    msg['To'] = SENDER_EMAIL
+    msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 合致:{len(all_results)}件"
+    msg.attach(MIMEText(body, 'plain'))
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print("メール送信完了")
+    except Exception as e:
+        print(f"メール送信エラー: {e}")
+
+if __name__ == "__main__":
+    main()
