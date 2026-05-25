@@ -19,12 +19,20 @@ stats = {
 }
 
 def connect_spreadsheet():
+    """Googleスプレッドシートへ安全に接続"""
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     secret_key = os.environ.get('GCP_SA_KEY')
-    creds = Credentials.from_service_account_info(json.loads(secret_key), scopes=scopes) if secret_key else Credentials.from_service_account_file("google_credentials.json", scopes=scopes)
-    return gspread.authorize(creds).open("adoGEM_検証ログ").worksheet("選定ログ")
+    if secret_key:
+        info = json.loads(secret_key)
+        creds = Credentials.from_service_account_info(info, scopes=scopes)
+    else:
+        creds = Credentials.from_service_account_file("google_credentials.json", scopes=scopes)
+    
+    client = gspread.authorize(creds)
+    return client.open("adoGEM_検証ログ").worksheet("選定ログ")
 
 def record_to_spreadsheet():
+    """本日の選定結果（条件4以降）をシートに自動追記"""
     try:
         sheet = connect_spreadsheet()
         today_str = datetime.date.today().strftime("%Y-%m-%d")
@@ -66,6 +74,7 @@ def get_stock_data_fallback(symbol):
         return None
 
 def update_yesterday_results():
+    """過去の『判定待ち』データの答え合わせ（◎◯▲✕ ＆ 前日比％）を自動実行"""
     try:
         sheet = connect_spreadsheet()
         all_records = sheet.get_all_values()
@@ -81,120 +90,4 @@ def update_yesterday_results():
                 sheet.update_cell(i + 1, 5, next_close)
                 sheet.update_cell(i + 1, 6, mark)
                 sheet.update_cell(i + 1, 7, f"{pct:+.2f}%")
-                print(f"【答え合わせ】{code}: {mark} ({pct:+.2f}%)")
-                time.sleep(0.5)
-    except Exception as e:
-        print(f"自動答え合わせエラー: {e}")
-
-def analyze_stock(symbol):
-    try:
-        df = get_stock_data_fallback(symbol)
-        if df is None or df.empty or len(df) < 100: return "SKIP"
-        if (pd.Timestamp.now() - df.index[-1]).days > 7: return "SKIP"
-        if df['Volume'].iloc[-1] < 50000 or df['Volume'].iloc[-1] == 0: return "SKIP"
-        stats["pass_volume"] += 1
-
-        df['MA5'] = df['Close'].rolling(5).mean()
-        df['MA20'] = df['Close'].rolling(20).mean()
-        df['MA60'] = df['Close'].rolling(60).mean()
-        df['MA100'] = df['Close'].rolling(100).mean()
-        df['MA300'] = df['Close'].rolling(300).mean() if len(df) >= 300 else None
-        
-        today, yest, yest2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
-        close, open_p, high = today['Close'], today['Open'], today['High']
-        ma5_t, ma20_t, ma60_t, ma100_t, ma300_t = today['MA5'], today['MA20'], today['MA60'], today['MA100'], today['MA300']
-
-        ppp_label = ""
-        if ma300_t is not None and (ma5_t > ma20_t > ma60_t > ma100_t > ma300_t): ppp_label = "★PPP "
-        elif ma300_t is None and (ma5_t > ma20_t > ma60_t > ma100_t): ppp_label = "★PPP(Short) "
-        stock_text = f"■ {symbol} | {int(close)}円"
-
-        if not (ma5_t < close) or close <= open_p: return "SKIP" 
-        if ma5_t > (open_p + (close - open_p) * 0.5): return "SKIP"
-        stats["pass_kahanshin"] += 1
-
-        if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
-        stats["pass_tame"] += 1
-        stats["list_tame"].append(f"  3 {ppp_label}{stock_text}")
-
-        if ma60_t <= yest['MA60']: return "SKIP" 
-        stats["pass_ma60_up"] += 1
-        stats["list_ma60_up"].append(f"  4 {ppp_label}{stock_text}")
-
-        if ma100_t <= yest['MA100']: return "SKIP"
-        stats["pass_trend_align"] += 1
-        stats["list_trend_align"].append(f"  長 {ppp_label}{stock_text}")
-
-        if (high - close) >= ((close - open_p) * 1.5): return "SKIP"
-        stats["pass_upper_shadow"] += 1
-        stats["list_upper_shadow"].append(f"  ヒ {ppp_label}{stock_text}")
-
-        if close >= df['High'].iloc[-6:-1].max():
-            stats["pass_new_high"] += 1
-            stats["list_new_high"].append(f"  5 {ppp_label}{stock_text}")
-
-        if close >= (df['High'].iloc[-100:].max() * 0.97): return "SKIP"
-        stats["pass_ceiling_avoid"] += 1
-        stats["list_ceiling_avoid"].append(f"  最終 {ppp_label}{stock_text}")
-
-        if "★PPP " in ppp_label: stats["★PPP"] += 1
-        elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
-        else: stats["normal_detect"] += 1
-        return f"{ppp_label}{stock_text}"
-    except:
-        return "ERROR"
-
-def get_target_symbols(start, end):
-    try:
-        url = "https://www.jpx.co.jp/markets/statistics-options/data/files/data_j.xls"
-        # JPXのExcel取得にブラウザを偽装するヘッダーを追加
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}, timeout=15)
-        df_jpx = pd.read_html(res.content)[0]
-        df_jpx.columns = df_jpx.iloc[0]
-        df_stocks = df_jpx[1:][df_jpx[1:]['市場・商品区分'].astype(str).str.contains('内国株式')]
-        codes = sorted(df_stocks[df_stocks['コード'].astype(str).apply(lambda c: str(start) <= c[:4] < str(end))]['コード'].astype(str).unique().tolist())
-        if codes: return codes
-        raise Exception("No codes fetched")
-    except:
-        # JPXが弾かれた場合は、1300から4000までの番号を自動で生成（安全装置）
-        return [str(i) for i in range(start, end)]
-
-def main():
-    start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 4000)
-    symbols = get_target_symbols(start_range, end_range)
-    all_results = []
-    for symbol in symbols:
-        res = analyze_stock(symbol)
-        if res not in ["ERROR", "SKIP"]: all_results.append(res)
-        time.sleep(0.1)  # 国内API用に少しウェイトを縮小
-
-    update_yesterday_results()
-    record_to_spreadsheet()
-
-    def list_str(lst): return "\n".join(lst) + "\n\n" if lst else "(該当なし)\n\n"
-    body = f"総対象: {len(symbols)}\n\n" \
-           f"1.出来高: {stats['pass_volume']}\n2.下半身: {stats['pass_kahanshin']}\n3.溜め: {stats['pass_tame']}\n" \
-           f"4.60日線: {stats['pass_ma60_up']}\n長トレンド: {stats['pass_trend_align']}\n上ヒゲ: {stats['pass_upper_shadow']}\n" \
-           f"5.新高値: {stats['pass_new_high']}\n6.天井圏回避: {stats['pass_ceiling_avoid']}\n\n" \
-           f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
-           f"【詳細】\n3.溜め:\n{list_str(stats['list_tame'])}4.60日:\n{list_str(stats['list_ma60_up'])}" \
-           f"長トレンド:\n{list_str(stats['list_trend_align'])}上ヒゲ:\n{list_str(stats['list_upper_shadow'])}" \
-           f"天井回避:\n{list_str(stats['list_ceiling_avoid'])}"
-
-    msg = MIMEMultipart()
-    msg['From'] = SENDER_EMAIL
-    msg['To'] = SENDER_EMAIL
-    msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 合致:{len(all_results)}件"
-    msg.attach(MIMEText(body, 'plain'))
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-        print("メール送信完了")
-    except Exception as e:
-        print(f"メール送信エラー: {e}")
-
-if __name__ == "__main__":
-    main()
+                print(f"【答え合わせ】{code
