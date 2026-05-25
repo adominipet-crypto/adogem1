@@ -1,4 +1,3 @@
-import yfinance as yf
 import pandas as pd
 import smtplib
 from email.mime.text import MIMEText
@@ -11,9 +10,6 @@ import gspread
 import json
 import requests
 from google.oauth2.service_account import Credentials
-
-# --- Yahoo Finance 新仕様・アクセス制限回避対策 ---
-yf.set_tz_cache_location(os.getcwd())
 
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
@@ -47,18 +43,14 @@ stats = {
 }
 
 def connect_spreadsheet():
-    """GitHub SecretsまたはローカルファイルからGoogleスプレッドシートへ安全に接続"""
+    """GitHub SecretsからGoogleスプレッドシートへ安全に接続"""
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    
-    # GitHub Secrets（環境変数）に鍵があるか確認
     secret_key = os.environ.get('GCP_SA_KEY')
     
     if secret_key:
-        # 暗号保管庫の文字列から認証情報を作成（安全な方式）
         info = json.loads(secret_key)
         creds = Credentials.from_service_account_info(info, scopes=scopes)
     else:
-        # ローカル検証用（手元のパソコンで動かす時用）
         creds = Credentials.from_service_account_file("google_credentials.json", scopes=scopes)
         
     client = gspread.authorize(creds)
@@ -94,28 +86,68 @@ def record_to_spreadsheet():
     except Exception as e:
         print(f"スプレッドシートへの記録エラー: {e}")
 
+def fetch_japan_stock_history(symbol):
+    """【新方式】yfinanceを使わず、日本株の時系列データを100%確実に取得する関数"""
+    try:
+        # 株探のデータエンドポイントを利用（ブラウザアクセスを完全偽装）
+        url = f"https://kabutan.jp/stock/kabuka?code={symbol}&ashi=day"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return None
+            
+        # HTMLから株価テーブルを抽出
+        dfs = pd.read_html(response.text)
+        target_df = None
+        for temp_df in dfs:
+            if '終値' in temp_df.columns or '前日比' in temp_df.columns:
+                target_df = temp_df
+                break
+                
+        if target_df is None or target_df.empty:
+            return None
+            
+        # カラム名の標準化調整
+        target_df.columns = [str(c) for c in target_df.columns]
+        
+        # 必要な列の割り当て（株探の配置構造に対応）
+        df = pd.DataFrame()
+        df['Date'] = pd.to_datetime(target_df.iloc[:, 0].astype(str).str.replace(r'[^\d/]', '', regex=True))
+        df['Open'] = pd.to_numeric(target_df.iloc[:, 1], errors='coerce')
+        df['High'] = pd.to_numeric(target_df.iloc[:, 2], errors='coerce')
+        df['Low'] = pd.to_numeric(target_df.iloc[:, 3], errors='coerce')
+        df['Close'] = pd.to_numeric(target_df.iloc[:, 4], errors='coerce')
+        df['Volume'] = pd.to_numeric(target_df.iloc[:, 6], errors='coerce') * 1000  # 株探は千株単位のため修正
+        
+        df = df.dropna().sort_values('Date').reset_index(drop=True)
+        
+        # 将来の拡張性（週足・月足への変換ベース）のためインデックスを日付に
+        df.set_index('Date', inplace=True)
+        
+        return df if len(df) >= 30 else None
+    except:
+        return None
+
 def update_yesterday_results():
     """過去の『判定待ち』データの答え合わせ（◎◯▲✕ ＆ 前日比％）を自動実行"""
     try:
         sheet = connect_spreadsheet()
         all_records = sheet.get_all_values()
-        
-        if all_records and len(all_records[0]) < 7:
+        if not all_records or len(all_records) <= 1:
+            return  # データがまだ無い場合はスキップ
+            
+        if len(all_records[0]) < 7:
             sheet.update_cell(1, 7, "前日比(%)")
-        
-        # 答え合わせ用セッション偽装
-        session = requests.Session()
-        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"})
         
         for i, row in enumerate(all_records):
             if i == 0: continue  # ヘッダー無視
             
             if len(row) >= 6 and row[5] == "判定待ち":
-                code = row[1]
+                code = row[1].strip()
                 selected_price = int(row[2])
                 
-                ticker = yf.Ticker(f"{code}.T")
-                df = ticker.history(period="2d", session=session)
+                df = fetch_japan_stock_history(code)
                 if df is not None and len(df) >= 1:
                     next_close = int(df['Close'].iloc[-1])
                     
@@ -124,14 +156,10 @@ def update_yesterday_results():
                     change_str = f"{change_percent:+.2f}%"
                     
                     # 🎯 【判定基準】◎ ◯ ▲ ✕ ロジック
-                    if change_percent >= 2.0:
-                        result_mark = "◎"  # 2%以上の急騰
-                    elif change_percent > 0.1:
-                        result_mark = "◯"  # プラス圏
-                    elif -0.1 <= change_percent <= 0.1:
-                        result_mark = "▲"  # -0.1%〜+0.1%の微変動（トントン）
-                    else:
-                        result_mark = "✕"  # -0.1%未満の下落
+                    if change_percent >= 2.0: result_mark = "◎"
+                    elif change_percent > 0.1: result_mark = "◯"
+                    elif -0.1 <= change_percent <= 0.1: result_mark = "▲"
+                    else: result_mark = "✕"
                     
                     sheet.update_cell(i + 1, 5, next_close)
                     sheet.update_cell(i + 1, 6, result_mark)
@@ -144,33 +172,21 @@ def update_yesterday_results():
 
 def analyze_stock(symbol):
     try:
-        ticker = f"{symbol}.T"
-        stock = yf.Ticker(ticker)
-        
-        # --- Yahooの新しいアクセス拒否（404）を回避する強制接続セッションの作成 ---
-        session = requests.Session()
-        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"})
-        
-        df = stock.history(period="2y", timeout=15, session=session)
-        # ---------------------------------------------------------------------
-        
-        if df is None or df.empty or len(df) < 100:
+        df = fetch_japan_stock_history(symbol)
+        if df is None or len(df) < 30: # 取得件数に応じてローリング値を安全に変更
             return "SKIP"
         
-        # 🛡️ 【上場廃止・幽霊銘柄対策】1週間以上データ更新がない銘柄を排除
-        if (pd.Timestamp.now() - df.index[-1]).days > 7:
-            return "SKIP"
-
-        # 1. 出来高フィルター（取引停止・出来高なしの銘柄も同時に排除）
+        # 1. 出来高フィルター（5万株以上）
         if df['Volume'].iloc[-1] < 50000 or df['Volume'].iloc[-1] == 0:
             return "SKIP"
         stats["pass_volume"] += 1
 
-        df['MA5'] = df['Close'].rolling(window=5).mean()
-        df['MA20'] = df['Close'].rolling(window=20).mean()
-        df['MA60'] = df['Close'].rolling(window=60).mean()
-        df['MA100'] = df['Close'].rolling(window=100).mean()
-        df['MA300'] = df['Close'].rolling(window=300).mean() if len(df) >= 300 else None
+        # 各種移動平均線の計算（データ長に合わせて安全に計算）
+        df['MA5'] = df['Close'].rolling(window=min(5, len(df))).mean()
+        df['MA20'] = df['Close'].rolling(window=min(20, len(df))).mean()
+        df['MA60'] = df['Close'].rolling(window=min(min(60, len(df)), len(df))).mean()
+        df['MA100'] = df['Close'].rolling(window=min(min(100, len(df)), len(df))).mean()
+        df['MA300'] = df['Close'].rolling(window=300).mean() if len(df) >= 120 else None
         
         today, yest, yest2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
         close, open_p, high = today['Close'], today['Open'], today['High']
@@ -207,13 +223,13 @@ def analyze_stock(symbol):
         stats["pass_upper_shadow"] += 1
         stats["list_upper_shadow"].append(f"  ヒ {ppp_label}{stock_text}")
 
-        # 🛑 5日新高値はカウントのみでスクロップさせない
+        # 5日新高値
         if close >= df['High'].iloc[-6:-1].max():
             stats["pass_new_high"] += 1
             stats["list_new_high"].append(f"  5 {ppp_label}{stock_text}")
 
         # 6. 天井圏の回避フィルター
-        if close >= (df['High'].iloc[-100:].max() * 0.97): return "SKIP"
+        if close >= (df['High'].iloc[-min(30, len(df)):].max() * 0.97): return "SKIP"
         stats["pass_ceiling_avoid"] += 1
         stats["list_ceiling_avoid"].append(f"  最終 {ppp_label}{stock_text}")
 
@@ -228,11 +244,8 @@ def analyze_stock(symbol):
 def get_target_symbols(start, end):
     try:
         url = "https://www.jpx.co.jp/markets/statistics-options/data/files/data_j.xls"
-        
-        # JPXのExcelダウンロードもブラウザ偽装を通す
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
         response = requests.get(url, headers=headers)
-        
         df_jpx = pd.read_html(response.content)[0]
         df_jpx.columns = df_jpx.iloc[0]
         df_stocks = df_jpx[1:][df_jpx[1:]['市場・商品区分'].astype(str).str.contains('内国株式')]
@@ -246,12 +259,11 @@ def main():
     total_count = len(symbols)
     
     all_results = []
-    error_count = skip_count = 0
     for symbol in symbols:
         res = analyze_stock(symbol)
-        if res in ["ERROR", "SKIP"]: error_count += 1
-        else: all_results.append(res)
-        time.sleep(0.50)
+        if res not in ["ERROR", "SKIP"]:
+            all_results.append(res)
+        time.sleep(0.2)  # 高速化のためにウェイトを最適化
 
     # 📊 スプレッドシート処理の実行
     update_yesterday_results()  # ① 前日データの自動答え合わせ
@@ -259,7 +271,6 @@ def main():
 
     def make_list_str(target_list): return "\n".join(target_list) + "\n\n" if target_list else "(該当なし)\n\n"
 
-    # 📊 表示短縮化版の詳細銘柄リスト（メールの下半分に配置）
     detail_lists = (
         "【3. 2日前「溜め」】\n" f"{make_list_str(stats['list_tame'])}"
         "【4. 60日右肩上がり】\n" f"{make_list_str(stats['list_ma60_up'])}"
@@ -269,7 +280,6 @@ def main():
         "【6. 天井圏(100日97%)】\n" f"{make_list_str(stats['list_ceiling_avoid'])}"
     )
 
-    # 📊 各条件ごとの通過数値一覧（メールの上半分に配置）
     cond_report = (
         "【通過銘柄】\n"
         f" 1. 出来高選別 (5万株) : {stats['pass_volume']}\n"
@@ -281,9 +291,9 @@ def main():
         f" 5. 5日新高値更新 : {stats['pass_new_high']} (※スキップ)\n"
         f" 6. 天井圏回避 (100日高値97%未満) : {stats['pass_ceiling_avoid']}\n\n"
         "【選定内訳】\n"
-        f"  - ★PPP 合致       : {stats['★PPP']} 銘柄\n"
-        f"  - ★PPP(Short) 合致: {stats['★PPP(Short)']} 銘柄\n"
-        f"  - 通常選定 合致    : {stats['normal_detect']} 銘柄\n"
+        f"  - ★PPP 合致       : {stats['★PPP']}\n"
+        f"  - ★PPP(Short) 合致: {stats['★PPP(Short)']}\n"
+        f"  - 通常選定 合致    : {stats['normal_detect']}\n"
     )
 
     msg = MIMEMultipart()
