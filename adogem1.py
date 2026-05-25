@@ -9,6 +9,7 @@ import sys
 import datetime
 import gspread
 import json
+import requests
 from google.oauth2.service_account import Credentials
 
 # --- Yahoo Finance 新仕様・アクセス制限回避対策 ---
@@ -102,6 +103,10 @@ def update_yesterday_results():
         if all_records and len(all_records[0]) < 7:
             sheet.update_cell(1, 7, "前日比(%)")
         
+        # 答え合わせ用セッション偽装
+        session = requests.Session()
+        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"})
+        
         for i, row in enumerate(all_records):
             if i == 0: continue  # ヘッダー無視
             
@@ -110,7 +115,7 @@ def update_yesterday_results():
                 selected_price = int(row[2])
                 
                 ticker = yf.Ticker(f"{code}.T")
-                df = ticker.history(period="2d")
+                df = ticker.history(period="2d", session=session)
                 if df is not None and len(df) >= 1:
                     next_close = int(df['Close'].iloc[-1])
                     
@@ -141,7 +146,13 @@ def analyze_stock(symbol):
     try:
         ticker = f"{symbol}.T"
         stock = yf.Ticker(ticker)
-        df = stock.history(period="2y", timeout=10)
+        
+        # --- Yahooの新しいアクセス拒否（404）を回避する強制接続セッションの作成 ---
+        session = requests.Session()
+        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"})
+        
+        df = stock.history(period="2y", timeout=15, session=session)
+        # ---------------------------------------------------------------------
         
         if df is None or df.empty or len(df) < 100:
             return "SKIP"
@@ -217,7 +228,12 @@ def analyze_stock(symbol):
 def get_target_symbols(start, end):
     try:
         url = "https://www.jpx.co.jp/markets/statistics-options/data/files/data_j.xls"
-        df_jpx = pd.read_html(url)[0]
+        
+        # JPXのExcelダウンロードもブラウザ偽装を通す
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        response = requests.get(url, headers=headers)
+        
+        df_jpx = pd.read_html(response.content)[0]
         df_jpx.columns = df_jpx.iloc[0]
         df_stocks = df_jpx[1:][df_jpx[1:]['市場・商品区分'].astype(str).str.contains('内国株式')]
         return sorted(df_stocks[df_stocks['コード'].astype(str).apply(lambda c: str(start) <= c[:4] < str(end))]['コード'].astype(str).unique().tolist())
