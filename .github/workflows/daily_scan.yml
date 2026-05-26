@@ -6,7 +6,7 @@ on:
     - cron: '0 11 * * 2-5'
     # 📆 日本時間の土曜日の 夜20:00 (世界標準時 11:00) ※金曜日の相場確定分
     - cron: '0 11 * * 6'
-  workflow_dispatch: # 🛠️ いつでも手動で即時実行できるボタンを残す
+  workflow_dispatch: # 🛠️ 手動で即時実行できるボタンを残す
 
 jobs:
   build:
@@ -33,4 +33,11 @@ jobs:
         EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
       run: |
-        python adogem1.py 1300 4000
+        # ① 1300 〜 4000 の範囲（記号入りを巻き込むため4001未満に設定）
+        python adogem1.py 1300 4001
+        
+        # ② 4001 〜 7000 の範囲（記号入りを巻き込むため7001未満に設定）
+        python adogem1.py 4001 7001
+        
+        # ③ 7001 〜 10000 の範囲（記号入りを巻き込むため10001未満に設定）
+        python adogem1.py 7001 10001
