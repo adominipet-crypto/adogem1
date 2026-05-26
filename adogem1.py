@@ -18,8 +18,11 @@ stats = {
     "list_tame": [], "list_ma60_up": [], "list_trend_align": [], "list_upper_shadow": [], "list_new_high": [], "list_ceiling_avoid": []
 }
 
+# 各銘柄が「どのステージまで残ったか」を追記するための記録辞書
+# { "銘柄コード": [価格, "最終通過したステージ名"] }
+highest_stages = {}
+
 def connect_spreadsheet():
-    """新しいスプレッドシート名とタブ名で接続"""
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     secret_key = os.environ.get('GCP_SA_KEY')
     if secret_key:
@@ -27,37 +30,26 @@ def connect_spreadsheet():
         creds = Credentials.from_service_account_info(info, scopes=scopes)
     else:
         creds = Credentials.from_service_account_file("google_credentials.json", scopes=scopes)
-    
-    # スプレッドシート名とタブ名を最新の指定に修正
     return gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ").worksheet("シート1")
 
 def record_to_spreadsheet():
-    """本日の選定結果（条件4以降）をシートに自動追記"""
+    """本日の選定結果（条件3以降）を、各銘柄の最高到達ステージのみ重複なしで自動追記"""
     try:
         sheet = connect_spreadsheet()
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         new_rows = []
-        target_stages = {
-            "4. 60日線右肩上がり": stats["list_ma60_up"], 
-            "新. 長期トレンド同期": stats["list_trend_align"],
-            "新. 上ヒゲ選別": stats["list_upper_shadow"], 
-            "6. 天井圏回避(最終)": stats["list_ceiling_avoid"]
-        }
-        for stage_name, stock_list in target_stages.items():
-            for stock in stock_list:
-                try:
-                    parts = stock.split(" ■ ")
-                    if len(parts) < 2: continue
-                    code_price = parts[1].replace("円", "").split(" | ")
-                    if len(code_price) < 2: continue
-                    code = code_price[0].strip()
-                    price = int(code_price[1].strip())
-                    new_rows.append([today_str, code, price, stage_name, "", "判定待ち"])
-                except:
-                    continue
+        
+        # main()での判定中に蓄積された highest_stages から行データを生成
+        for code, data in highest_stages.items():
+            price = data[0]
+            stage_name = data[1]
+            new_rows.append([today_str, code, price, stage_name, "", "判定待ち"])
+            
         if new_rows:
+            # 銘柄コード順に並び替えてシートへ追加
+            new_rows.sort(key=lambda x: x[1])
             sheet.append_rows(new_rows)
-            print(f"【シート記録】{len(new_rows)} 件記録しました。")
+            print(f"【シート記録】条件3以上の重複なしデータ {len(new_rows)} 件を記録しました。")
     except Exception as e:
         print(f"シート記録エラー: {e}")
 
@@ -82,7 +74,6 @@ def get_stock_data_fallback(symbol):
         return None
 
 def update_yesterday_results():
-    """過去の『判定待ち』データの答え合わせ（◎◯▲✕ ＆ 前日比％）を自動実行"""
     try:
         sheet = connect_spreadsheet()
         all_records = sheet.get_all_values()
@@ -133,26 +124,37 @@ def analyze_stock(symbol):
         if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
         stats["pass_tame"] += 1
         stats["list_tame"].append(f"  3 {ppp_label}{stock_text}")
+        # 【条件3通過】暫定の最高ステージとしてセット
+        highest_stages[symbol] = [int(close), "3. 溜め"]
 
         if ma60_t <= yest['MA60']: return "SKIP" 
         stats["pass_ma60_up"] += 1
         stats["list_ma60_up"].append(f"  4 {ppp_label}{stock_text}")
+        # 【条件4通過】最高ステージを上書き更新
+        highest_stages[symbol] = [int(close), "4. 60日線右肩上がり"]
 
         if ma100_t <= yest['MA100']: return "SKIP"
         stats["pass_trend_align"] += 1
         stats["list_trend_align"].append(f"  長 {ppp_label}{stock_text}")
+        # 【長期トレンド通過】更新
+        highest_stages[symbol] = [int(close), "新. 長期トレンド同期"]
 
         if (high - close) >= ((close - open_p) * 1.5): return "SKIP"
         stats["pass_upper_shadow"] += 1
         stats["list_upper_shadow"].append(f"  ヒ {ppp_label}{stock_text}")
+        # 【上ヒゲ選別通過】更新
+        highest_stages[symbol] = [int(close), "新. 上ヒゲ選別"]
 
         if close >= df['High'].iloc[-6:-1].max():
             stats["pass_new_high"] += 1
             stats["list_new_high"].append(f"  5 {ppp_label}{stock_text}")
+            # ※5日新高値はスキップ中ですがロジック上通ればここを通ります
 
         if close >= (df['High'].iloc[-100:].max() * 0.97): return "SKIP"
         stats["pass_ceiling_avoid"] += 1
         stats["list_ceiling_avoid"].append(f"  最終 {ppp_label}{stock_text}")
+        # 【天井圏回避（最終）通過】最終更新
+        highest_stages[symbol] = [int(close), "6. 天井圏回避(最終)"]
 
         if "★PPP " in ppp_label: stats["★PPP"] += 1
         elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
@@ -183,7 +185,7 @@ def main():
         if res not in ["ERROR", "SKIP"]: all_results.append(res)
         time.sleep(0.1)
 
-    # 📊 スプレッドシート処理
+    # 📊 スプレッドシート更新（答え合わせ ＆ 重複なし新規追記）
     update_yesterday_results()
     record_to_spreadsheet()
 
