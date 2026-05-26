@@ -19,7 +19,7 @@ stats = {
 }
 
 def connect_spreadsheet():
-    """Googleスプレッドシートへ安全に接続"""
+    """新しいスプレッドシート名とタブ名で接続"""
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     secret_key = os.environ.get('GCP_SA_KEY')
     if secret_key:
@@ -27,7 +27,9 @@ def connect_spreadsheet():
         creds = Credentials.from_service_account_info(info, scopes=scopes)
     else:
         creds = Credentials.from_service_account_file("google_credentials.json", scopes=scopes)
-    return gspread.authorize(creds).open("adoGEM_検証ログ").worksheet("選定ログ")
+    
+    # スプレッドシート名とタブ名を最新の指定に修正
+    return gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ").worksheet("シート1")
 
 def record_to_spreadsheet():
     """本日の選定結果（条件4以降）をシートに自動追記"""
@@ -44,7 +46,6 @@ def record_to_spreadsheet():
         for stage_name, stock_list in target_stages.items():
             for stock in stock_list:
                 try:
-                    # 「  4 ■ 1434 | 2132円」のような文字列からコードと価格を分解
                     parts = stock.split(" ■ ")
                     if len(parts) < 2: continue
                     code_price = parts[1].replace("円", "").split(" | ")
