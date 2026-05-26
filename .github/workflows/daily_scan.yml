@@ -2,10 +2,11 @@ name: adoGEM Triple Scan
 
 on:
   schedule:
-    - cron: '0 9 * * *'  # 日本時間 18:00
-    - cron: '0 12 * * *' # 日本時間 21:00
-    - cron: '0 15 * * *' # 日本時間 00:00
-  workflow_dispatch:      # 手動実行ボタン用
+    # 📆 日本時間の火曜日〜金曜日の 夜20:00 (世界標準時 11:00)
+    - cron: '0 11 * * 2-5'
+    # 📆 日本時間の土曜日の 夜20:00 (世界標準時 11:00) ※金曜日の相場確定分
+    - cron: '0 11 * * 6'
+  workflow_dispatch: # 🛠️ いつでも手動で即時実行できるボタンを残す
 
 jobs:
   build:
@@ -13,20 +14,20 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.10'
+        cache: 'pip'
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas pandas_datareader gspread oauth2client lxml
-        pip install --upgrade yfinance
+        pip install pandas pandas_datareader yfinance gspread google-auth openpyxl html5lib lxml requests
 
-    - name: Run Split Scan
+    - name: Run Scan Script
       env:
         EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
         EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
