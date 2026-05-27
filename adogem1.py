@@ -18,11 +18,11 @@ stats = {
     "list_tame": [], "list_ma60_up": [], "list_trend_align": [], "list_upper_shadow": [], "list_new_high": [], "list_ceiling_avoid": []
 }
 
-# 各銘柄が「どのステージまで残ったか」を追記するための記録辞書
-# { "銘柄コード": [価格, "最終通過したステージ名"] }
+# 銘柄ごとの最高到達ステージを保持 { "コード": [価格, "ステージ名"] }
 highest_stages = {}
 
 def connect_spreadsheet():
+    """最新のスプレッドシート名とタブ名で接続"""
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     secret_key = os.environ.get('GCP_SA_KEY')
     if secret_key:
@@ -33,23 +33,25 @@ def connect_spreadsheet():
     return gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ").worksheet("シート1")
 
 def record_to_spreadsheet():
-    """本日の選定結果（条件3以降）を、各銘柄の最高到達ステージのみ重複なしで自動追記"""
+    """
+    本日の選定結果（条件3以降）を重複なしで自動追記
+    配置パターンA: 【 1.日付 | 2.コード | 3.判定ステージ | 4.選定時終値 | 5.翌日終値 | 6.判定マーク | 7.前日比(%) 】
+    """
     try:
         sheet = connect_spreadsheet()
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         new_rows = []
         
-        # main()での判定中に蓄積された highest_stages から行データを生成
         for code, data in highest_stages.items():
             price = data[0]
             stage_name = data[1]
-            new_rows.append([today_str, code, price, stage_name, "", "判定待ち"])
+            # パターンAの順序で1行のデータを構築（翌日終値・マーク・前日比は最初は空欄、ステータスを一時的に『判定待ち』にするため6列目を空欄、7列目を判定待ちにします）
+            new_rows.append([today_str, code, stage_name, price, "", "", "判定待ち"])
             
         if new_rows:
-            # 銘柄コード順に並び替えてシートへ追加
-            new_rows.sort(key=lambda x: x[1])
+            new_rows.sort(key=lambda x: x[1])  # コード順にソート
             sheet.append_rows(new_rows)
-            print(f"【シート記録】条件3以上の重複なしデータ {len(new_rows)} 件を記録しました。")
+            print(f"【シート記録】パターンAの配置で {len(new_rows)} 件を記録しました。")
     except Exception as e:
         print(f"シート記録エラー: {e}")
 
@@ -74,21 +76,31 @@ def get_stock_data_fallback(symbol):
         return None
 
 def update_yesterday_results():
+    """
+    過去の『判定待ち』データの自動答え合わせ
+    パターンA用：7列目が「判定待ち」の行を対象とし、4列目(選定時終値)を基準に、5列目(翌日終値), 6列目(マーク), 7列目(前日比%)を更新
+    """
     try:
         sheet = connect_spreadsheet()
         all_records = sheet.get_all_values()
-        if all_records and len(all_records[0]) < 7: sheet.update_cell(1, 7, "前日比(%)")
+        
         for i, row in enumerate(all_records):
-            if i == 0 or len(row) < 6 or row[5] != "判定待ち": continue
-            code, selected_price = row[1], int(row[2])
+            # 1行目はヘッダー、列が足りない場合、または7列目が「判定待ち」ではない場合はスキップ
+            if i == 0 or len(row) < 7 or row[6] != "判定待ち": continue
+            
+            code = row[1]
+            selected_price = int(row[3]) # 4列目（選定時終値）
+            
             df = get_stock_data_fallback(code)
             if df is not None and len(df) >= 1:
                 next_close = int(df['Close'].iloc[-1])
                 pct = ((next_close - selected_price) / selected_price) * 100
                 mark = "◎" if pct >= 2.0 else "◯" if pct > 0.1 else "▲" if pct >= -0.1 else "✕"
-                sheet.update_cell(i + 1, 5, next_close)
-                sheet.update_cell(i + 1, 6, mark)
-                sheet.update_cell(i + 1, 7, f"{pct:+.2f}%")
+                
+                sheet.update_cell(i + 1, 5, next_close)      # 5列目: 翌日終値
+                sheet.update_cell(i + 1, 6, mark)            # 6列目: 判定マーク
+                sheet.update_cell(i + 1, 7, f"{pct:+.2f}%")  # 7列目: 前日比(%)に上書き（これで判定待ちが消えます）
+                
                 print(f"【答え合わせ】{code}: {mark} ({pct:+.2f}%)")
                 time.sleep(0.5)
     except Exception as e:
@@ -124,36 +136,30 @@ def analyze_stock(symbol):
         if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
         stats["pass_tame"] += 1
         stats["list_tame"].append(f"  3 {ppp_label}{stock_text}")
-        # 【条件3通過】暫定の最高ステージとしてセット
         highest_stages[symbol] = [int(close), "3. 溜め"]
 
         if ma60_t <= yest['MA60']: return "SKIP" 
         stats["pass_ma60_up"] += 1
         stats["list_ma60_up"].append(f"  4 {ppp_label}{stock_text}")
-        # 【条件4通過】最高ステージを上書き更新
         highest_stages[symbol] = [int(close), "4. 60日線右肩上がり"]
 
         if ma100_t <= yest['MA100']: return "SKIP"
         stats["pass_trend_align"] += 1
         stats["list_trend_align"].append(f"  長 {ppp_label}{stock_text}")
-        # 【長期トレンド通過】更新
         highest_stages[symbol] = [int(close), "新. 長期トレンド同期"]
 
         if (high - close) >= ((close - open_p) * 1.5): return "SKIP"
         stats["pass_upper_shadow"] += 1
         stats["list_upper_shadow"].append(f"  ヒ {ppp_label}{stock_text}")
-        # 【上ヒゲ選別通過】更新
         highest_stages[symbol] = [int(close), "新. 上ヒゲ選別"]
 
         if close >= df['High'].iloc[-6:-1].max():
             stats["pass_new_high"] += 1
             stats["list_new_high"].append(f"  5 {ppp_label}{stock_text}")
-            # ※5日新高値はスキップ中ですがロジック上通ればここを通ります
 
         if close >= (df['High'].iloc[-100:].max() * 0.97): return "SKIP"
         stats["pass_ceiling_avoid"] += 1
         stats["list_ceiling_avoid"].append(f"  最終 {ppp_label}{stock_text}")
-        # 【天井圏回避（最終）通過】最終更新
         highest_stages[symbol] = [int(close), "6. 天井圏回避(最終)"]
 
         if "★PPP " in ppp_label: stats["★PPP"] += 1
@@ -185,7 +191,7 @@ def main():
         if res not in ["ERROR", "SKIP"]: all_results.append(res)
         time.sleep(0.1)
 
-    # 📊 スプレッドシート更新（答え合わせ ＆ 重複なし新規追記）
+    # 📊 スプレッドシート処理（答え合わせ＆パターンAでの新規記録）
     update_yesterday_results()
     record_to_spreadsheet()
 
