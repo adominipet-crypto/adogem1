@@ -5,8 +5,7 @@ import pandas as pd
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import os, time, sys, datetime, gspread, json, requests
-from google.oauth2.service_account import Credentials
+import os, time, sys, datetime, gspread, json, requests, traceback
 
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
@@ -29,25 +28,47 @@ def connect_spreadsheet():
         creds = Credentials.from_service_account_file("google_credentials.json", scopes=scopes)
     return gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ").worksheet("シート1")
 
+def send_error_email(error_message, start_range, end_range):
+    """プログラム異常終了時にエラーログをメール送信する関数"""
+    msg = MIMEMultipart()
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = SENDER_EMAIL
+    msg['Subject'] = f"⚠️【エラー発生】adoGEM スキャン停止 ({start_range}-{end_range})"
+    
+    body = f"プログラムの実行中にエラーが発生し、処理が中断されました。\n" \
+           f"発生日時: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n" \
+           f"【エラー詳細・ログ】\n" \
+           f"--------------------------------------------------\n" \
+           f"{error_message}\n" \
+           f"--------------------------------------------------"
+    
+    msg.attach(MIMEText(body, 'plain'))
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print("【システム】エラーメールを正常に送信しました。")
+    except Exception as e:
+        print(f"エラーメール送信失敗: {e}")
+
 def record_to_spreadsheet():
-    """本日の選定結果（条件3以降）を、既存のデータを壊さず最下部に『完全追記』する"""
     try:
         sheet = connect_spreadsheet()
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         new_rows = []
-        
         for code, data in highest_stages.items():
             price = data["price"]
             stage_name = data["stage_name"]
             new_rows.append([today_str, code, stage_name, price, "", "", "判定待ち"])
-            
         if new_rows:
-            new_rows.sort(key=lambda x: x[1])  # コード順にソート
-            # append_rows を使い、既存データを一切上書きせず、シートの一番下へ確実に追加する
+            new_rows.sort(key=lambda x: x[1])
             sheet.append_rows(new_rows, value_input_option='RAW')
             print(f"【シート記録】現在の範囲の {len(new_rows)} 件を追記しました。")
     except Exception as e:
         print(f"シート記録エラー: {e}")
+        raise e
 
 def get_stock_data_fallback(symbol):
     try:
@@ -70,7 +91,6 @@ def get_stock_data_fallback(symbol):
         return None
 
 def update_yesterday_results():
-    """過去の『判定待ち』データの答え合わせ"""
     try:
         sheet = connect_spreadsheet()
         all_records = sheet.get_all_values()
@@ -82,11 +102,8 @@ def update_yesterday_results():
             df = get_stock_data_fallback(code)
             if df is not None and len(df) >= 1:
                 next_close = int(df['Close'].iloc[-1])
-                
-                # 判定エラー回避セーフティ（同額時のフライング対策）
                 if next_close == selected_price and len(df) >= 2:
                     next_close = int(df['Close'].iloc[-2])
-                
                 pct = ((next_close - selected_price) / selected_price) * 100
                 mark = "◎" if pct >= 2.0 else "◯" if pct > 0.1 else "▲" if pct >= -0.1 else "✕"
                 sheet.update_cell(i + 1, 5, next_close)
@@ -98,6 +115,7 @@ def update_yesterday_results():
         print(f"【システム】合計 {updated_count} 件の答え合わせを完了しました。")
     except Exception as e:
         print(f"自動答え合わせエラー: {e}")
+        raise e
 
 def analyze_stock(symbol):
     try:
@@ -169,57 +187,60 @@ def get_target_symbols(start, end):
         return [str(i) for i in range(start, end)]
 
 def main():
-    start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 4000)
+    start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
     
-    # 最初の「1300〜4001」の実行時（夜20:00）に全範囲の答え合わせを先行処理
-    if start_range == 1300:
-        print("【システム】20:00のデータで、すべての答え合わせを先行実行します。")
-        update_yesterday_results()
-        time.sleep(2) # 次の処理への安全バッファ
-    else:
-        print("【システム】答え合わせは最初の便で完了しているため、スキップしてスキャンを開始します。")
-
-    symbols = get_target_symbols(start_range, end_range)
-    all_results = []
-    for symbol in symbols:
-        res = analyze_stock(symbol)
-        if res not in ["ERROR", "SKIP"]: all_results.append(res)
-        time.sleep(0.1)
-
-    # 🌟 本日の新規選定分の記録（競合を避けるため、起動レンジごとに微小なディレイを入れて確実に『追記』させる）
-    if start_range != 1300:
-        time.sleep(5)  # 便ごとの書き込み衝突を避ける安全対策
-    record_to_spreadsheet()
-
-    mail_lists = {"tame": [], "ma60_up": [], "trend_align": [], "upper_shadow": [], "ceiling_avoid": []}
-    for code, data in highest_stages.items():
-        key = data["stage_key"]
-        if key in mail_lists: mail_lists[key].append(data["text"])
-
-    def list_str(lst): return "\n".join(lst) + "\n\n" if lst else "(該当なし)\n\n"
-    body = f"総対象: {len(symbols)}\n\n" \
-           f"1.出来高: {stats['pass_volume']}\n2.下半身: {stats['pass_kahanshin']}\n3.溜め: {stats['pass_tame']}\n" \
-           f"4.60日線: {stats['pass_ma60_up']}\n長トレンド: {stats['pass_trend_align']}\n上ヒゲ: {stats['pass_upper_shadow']}\n" \
-           f"5.新高値: {stats['pass_new_high']}\n6.天井圏回避: {stats['pass_ceiling_avoid']}\n\n" \
-           f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
-           f"【詳細】\n3.溜め:\n{list_str(mail_lists['tame'])}4.60日:\n{list_str(mail_lists['ma60_up'])}" \
-           f"長トレンド:\n{list_str(mail_lists['trend_align'])}上ヒゲ:\n{list_str(mail_lists['upper_shadow'])}" \
-           f"天井回避:\n{list_str(mail_lists['ceiling_avoid'])}"
-
-    msg = MIMEMultipart()
-    msg['From'] = SENDER_EMAIL
-    msg['To'] = SENDER_EMAIL
-    msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 合致:{len(all_results)}件"
-    msg.attach(MIMEText(body, 'plain'))
     try:
+        # 答え合わせの先行実行
+        if start_range == 1300:
+            print("【システム】20:00のデータで、すべての答え合わせを先行実行します。")
+            update_yesterday_results()
+            time.sleep(2)
+
+        symbols = get_target_symbols(start_range, end_range)
+        all_results = []
+        for symbol in symbols:
+            res = analyze_stock(symbol)
+            if res not in ["ERROR", "SKIP"]: all_results.append(res)
+            time.sleep(0.1)
+
+        # 本日の新規選定分の記録
+        record_to_spreadsheet()
+
+        # メール詳細テキスト生成
+        mail_lists = {"tame": [], "ma60_up": [], "trend_align": [], "upper_shadow": [], "ceiling_avoid": []}
+        for code, data in highest_stages.items():
+            key = data["stage_key"]
+            if key in mail_lists: mail_lists[key].append(data["text"])
+
+        def list_str(lst): return "\n".join(lst) + "\n\n" if lst else "(該当なし)\n\n"
+        body = f"総対象: {len(symbols)}\n\n" \
+               f"1.出来高: {stats['pass_volume']}\n2.下半身: {stats['pass_kahanshin']}\n3.溜め: {stats['pass_tame']}\n" \
+               f"4.60日線: {stats['pass_ma60_up']}\n長トレンド: {stats['pass_trend_align']}\n上ヒゲ: {stats['pass_upper_shadow']}\n" \
+               f"5.新高値: {stats['pass_new_high']}\n6.天井圏回避: {stats['pass_ceiling_avoid']}\n\n" \
+               f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
+               f"【詳細】\n3.溜め:\n{list_str(mail_lists['tame'])}4.60日:\n{list_str(mail_lists['ma60_up'])}" \
+               f"長トレンド:\n{list_str(mail_lists['trend_align'])}上ヒゲ:\n{list_str(mail_lists['upper_shadow'])}" \
+               f"天井回避:\n{list_str(mail_lists['ceiling_avoid'])}"
+
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = SENDER_EMAIL
+        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 合致:{len(all_results)}件"
+        msg.attach(MIMEText(body, 'plain'))
+        
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
         server.quit()
         print("メール送信完了")
+        
     except Exception as e:
-        print(f"メール送信エラー: {e}")
+        # 🌟 エラー捕捉：エラー原因（ログ）を抽出してメール送信
+        error_log = traceback.format_exc()
+        print(f"【システム警告】致命的エラーを検知しました:\n{error_log}")
+        send_error_email(error_log, start_range, end_range)
+        sys.exit(1) # GitHub Actions側にもエラー終了を明示的に通知
 
 if __name__ == "__main__":
     main()
