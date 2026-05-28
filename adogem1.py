@@ -30,18 +30,22 @@ def connect_spreadsheet():
     return gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ").worksheet("シート1")
 
 def record_to_spreadsheet():
+    """本日の選定結果（条件3以降）を、既存のデータを壊さず最下部に『完全追記』する"""
     try:
         sheet = connect_spreadsheet()
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         new_rows = []
+        
         for code, data in highest_stages.items():
             price = data["price"]
             stage_name = data["stage_name"]
             new_rows.append([today_str, code, stage_name, price, "", "", "判定待ち"])
+            
         if new_rows:
-            new_rows.sort(key=lambda x: x[1])
-            sheet.append_rows(new_rows)
-            print(f"【シート記録】パターンAの配置で {len(new_rows)} 件を記録しました。")
+            new_rows.sort(key=lambda x: x[1])  # コード順にソート
+            # append_rows を使い、既存データを一切上書きせず、シートの一番下へ確実に追加する
+            sheet.append_rows(new_rows, value_input_option='RAW')
+            print(f"【シート記録】現在の範囲の {len(new_rows)} 件を追記しました。")
     except Exception as e:
         print(f"シート記録エラー: {e}")
 
@@ -66,7 +70,7 @@ def get_stock_data_fallback(symbol):
         return None
 
 def update_yesterday_results():
-    """過去の『判定待ち』データの答え合わせ（ここ単体で動くように安全設計）"""
+    """過去の『判定待ち』データの答え合わせ"""
     try:
         sheet = connect_spreadsheet()
         all_records = sheet.get_all_values()
@@ -79,9 +83,8 @@ def update_yesterday_results():
             if df is not None and len(df) >= 1:
                 next_close = int(df['Close'].iloc[-1])
                 
-                # 判定エラー回避：万が一取得データが選定価格と完全に同額かつボリュームが不自然な場合は、1営業日前を参照するセーフティ
+                # 判定エラー回避セーフティ（同額時のフライング対策）
                 if next_close == selected_price and len(df) >= 2:
-                    # ヤフーのバグで「まだ動いていない未来の日付」を掴んでいる可能性があるため、1つ前の確定値を見る
                     next_close = int(df['Close'].iloc[-2])
                 
                 pct = ((next_close - selected_price) / selected_price) * 100
@@ -168,10 +171,11 @@ def get_target_symbols(start, end):
 def main():
     start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 4000)
     
-    # 🌟【最重要の改善】最初の「1300〜4001」の実行時（＝夜20:00の一番最初のタイミング）に全範囲の答え合わせを先行処理する
+    # 最初の「1300〜4001」の実行時（夜20:00）に全範囲の答え合わせを先行処理
     if start_range == 1300:
-        print("【システム】20:00のデータが新鮮なうちに、すべての答え合わせを先行実行します。")
+        print("【システム】20:00のデータで、すべての答え合わせを先行実行します。")
         update_yesterday_results()
+        time.sleep(2) # 次の処理への安全バッファ
     else:
         print("【システム】答え合わせは最初の便で完了しているため、スキップしてスキャンを開始します。")
 
@@ -182,7 +186,9 @@ def main():
         if res not in ["ERROR", "SKIP"]: all_results.append(res)
         time.sleep(0.1)
 
-    # 本日の新規選定分の記録
+    # 🌟 本日の新規選定分の記録（競合を避けるため、起動レンジごとに微小なディレイを入れて確実に『追記』させる）
+    if start_range != 1300:
+        time.sleep(5)  # 便ごとの書き込み衝突を避ける安全対策
     record_to_spreadsheet()
 
     mail_lists = {"tame": [], "ma60_up": [], "trend_align": [], "upper_shadow": [], "ceiling_avoid": []}
