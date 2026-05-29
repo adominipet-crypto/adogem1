@@ -61,7 +61,6 @@ def record_to_spreadsheet():
         for code, data in highest_stages.items():
             price = data["price"]
             stage_name = data["stage_name"]
-            # ppp_labelが空の場合は「通常」として記録
             ppp_status = data["ppp_label"].strip() if data["ppp_label"].strip() else "通常"
             
             # [日付(A), コード(B), ステージ名(C), PPP(D), 選定時終値(E), 翌日終値(F), 判定(G), 前日比(H)]
@@ -100,11 +99,9 @@ def update_yesterday_results():
         cell_list = []
         
         for i, row in enumerate(all_records):
-            # 🌟 列数チェックを「8列（H列まで）未満」または「G列(インデックス6)が判定待ちではない」場合にスキップするよう修正
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
             code = row[1]
             
-            # 🌟 列追加に伴い、選定時終値は「5番目の要素（E列 = インデックス4）」
             try:
                 selected_price = int(row[4])
             except ValueError:
@@ -119,7 +116,6 @@ def update_yesterday_results():
                 pct = ((next_close - selected_price) / selected_price) * 100
                 mark = "◎" if pct >= 2.0 else "◯" if pct > 0.1 else "▲" if pct >= -0.1 else "✕"
                 
-                # 🌟 書き込み先を F列(6), G列(7), H列(8) にシフト
                 cell_list.append(gspread.Cell(i + 1, 6, next_close))
                 cell_list.append(gspread.Cell(i + 1, 7, mark))
                 cell_list.append(gspread.Cell(i + 1, 8, f"{pct:+.2f}%"))
@@ -147,7 +143,7 @@ def analyze_stock(symbol):
         df['MA300'] = df['Close'].rolling(300).mean() if len(df) >= 300 else None
         
         today, yest, yest2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
-        close, open_p, high = today['Close'], today['Open'], today['High']
+        close, open_p, high, low = today['Close'], today['Open'], today['High'], today['Low']
         ma5_t, ma20_t, ma60_t, ma100_t, ma300_t = today['MA5'], today['MA20'], today['MA60'], today['MA100'], today['MA300']
 
         ppp_label = ""
@@ -157,6 +153,22 @@ def analyze_stock(symbol):
             ppp_label = "★PPP(Short) "
             
         stock_text = f"■ {symbol} | {int(close)}円"
+
+        # 🌟 精密な十字線（迷いのクロス）限定の回避ロジック
+        day_range = high - low
+        if day_range > 0:
+            body_size = abs(close - open_p)
+            # 実体が極小（5%未満）
+            if (body_size / day_range) < 0.05:
+                high_box = max(close, open_p)
+                low_box = min(close, open_p)
+                upper_shadow = high - high_box
+                lower_shadow = low_box - low
+                
+                # 🌟 上ヒゲも下ヒゲも両方一定以上（25%以上）ある「売り買い拮抗の十字線」だけを除外
+                # ➔ これにより、下ヒゲだけが長い「強いピンバー」は除外されずに通過します
+                if (upper_shadow / day_range) >= 0.25 and (lower_shadow / day_range) >= 0.25:
+                    return "SKIP"
 
         if not (ma5_t < close) or close <= open_p: return "SKIP" 
         stats["pass_kahanshin"] += 1
