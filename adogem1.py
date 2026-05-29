@@ -155,16 +155,16 @@ def analyze_stock(symbol):
 
         if ma100_t <= yest['MA100']: return "SKIP"
         stats["pass_trend_align"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "trend_align", "text": f"  長 {ppp_label}{stock_text}", "stage_name": "新. 長期トレンド同期"}
+        highest_stages[symbol] = {"price": int(close), "stage_key": "trend_align", "text": f"  長 {ppp_label}{stock_text}", "stage_name": "5. 長期トレンド同期"}
 
         if (high - close) >= ((close - open_p) * 1.5): return "SKIP"
         stats["pass_upper_shadow"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "upper_shadow", "text": f"  ヒ {ppp_label}{stock_text}", "stage_name": "新. 上ヒゲ選別"}
+        highest_stages[symbol] = {"price": int(close), "stage_key": "upper_shadow", "text": f"  ヒ {ppp_label}{stock_text}", "stage_name": "6. 上ヒゲ選別"}
 
         if close >= df['High'].iloc[-6:-1].max(): stats["pass_new_high"] += 1
         if close >= (df['High'].iloc[-100:].max() * 0.97): return "SKIP"
         stats["pass_ceiling_avoid"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "ceiling_avoid", "text": f"  最終 {ppp_label}{stock_text}", "stage_name": "6. 天井圏回避(最終)"}
+        highest_stages[symbol] = {"price": int(close), "stage_key": "ceiling_avoid", "text": f"  最終 {ppp_label}{stock_text}", "stage_name": "7. 天井圏回避(最終)"}
 
         if "★PPP " in ppp_label: stats["★PPP"] += 1
         elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
