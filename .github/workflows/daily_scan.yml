@@ -4,17 +4,18 @@ on:
   schedule:
     # 祝日を除く月〜金、日本時間20:00（UTC 11:00）に自動起動
     - cron: '0 11 * * 1-5'
-  workflow_dispatch: # 手動実行ボタン（ここからいつでも手動起動できます）
+  workflow_dispatch: # 手動実行ボタン
 
 jobs:
   scan-and-report:
     runs-on: ubuntu-latest
     steps:
+      # 🌟 アクションのバージョンを最新版（v4, v5）に指定
       - name: Checkout repository
-        uses: actions/checkout@v4 # v3 から v4 にアップデート
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5 # 👈 actions/tools/python から修正
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -28,6 +29,7 @@ jobs:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          # 🌟 GitHubが推奨するNode.js 24強制オプションを追加して警告を完全消去
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
         run: |
-          # 🌟 引数を「1300 10001」にして、全市場を1本の流れで連続スキャンさせます
           python adogem1.py 1300 10001
