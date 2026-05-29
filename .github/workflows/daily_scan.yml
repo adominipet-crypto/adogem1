@@ -1,4 +1,4 @@
-Name: adoGEM Full Scan Continuous
+name: adoGEM Full Scan Continuous
 
 on:
   schedule:
