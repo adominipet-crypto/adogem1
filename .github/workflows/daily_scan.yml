@@ -1,4 +1,4 @@
-name: adoGEM Full Scan Continuous
+Name: adoGEM Full Scan Continuous
 
 on:
   schedule:
@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # v3 から v4 にアップデート
 
       - name: Set up Python
-        uses: actions/tools/python@v4
+        uses: actions/setup-python@v5 # 👈 actions/tools/python から修正
         with:
           python-version: '3.10'
 
