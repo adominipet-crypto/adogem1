@@ -6,6 +6,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os, time, sys, datetime, gspread, json, requests, traceback
+from google.oauth2.service_account import Credentials  # 💡追加：エラー解消用
 
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
@@ -29,7 +30,6 @@ def connect_spreadsheet():
     return gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ").worksheet("シート1")
 
 def send_error_email(error_message, start_range, end_range):
-    """プログラム異常終了時にエラーログをメール送信する関数"""
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
     msg['To'] = SENDER_EMAIL
@@ -190,7 +190,6 @@ def main():
     start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
     
     try:
-        # 答え合わせの先行実行
         if start_range == 1300:
             print("【システム】20:00のデータで、すべての答え合わせを先行実行します。")
             update_yesterday_results()
@@ -203,10 +202,8 @@ def main():
             if res not in ["ERROR", "SKIP"]: all_results.append(res)
             time.sleep(0.1)
 
-        # 本日の新規選定分の記録
         record_to_spreadsheet()
 
-        # メール詳細テキスト生成
         mail_lists = {"tame": [], "ma60_up": [], "trend_align": [], "upper_shadow": [], "ceiling_avoid": []}
         for code, data in highest_stages.items():
             key = data["stage_key"]
@@ -236,11 +233,10 @@ def main():
         print("メール送信完了")
         
     except Exception as e:
-        # 🌟 エラー捕捉：エラー原因（ログ）を抽出してメール送信
         error_log = traceback.format_exc()
         print(f"【システム警告】致命的エラーを検知しました:\n{error_log}")
         send_error_email(error_log, start_range, end_range)
-        sys.exit(1) # GitHub Actions側にもエラー終了を明示的に通知
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
