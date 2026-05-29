@@ -49,6 +49,7 @@ def send_error_email(error_message, start_range, end_range):
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
         server.quit()
+        print("【システム】エラーメールを送信しました。")
     except Exception as e:
         print(f"エラーメール送信失敗: {e}")
 
@@ -80,114 +81,4 @@ def get_stock_data_fallback(symbol):
         quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
         timestamps = result[0].get("timestamp", [])
         df = pd.DataFrame({
-            "Open": quotes.get("open", []), "High": quotes.get("high", []),
-            "Low": quotes.get("low", []), "Close": quotes.get("close", []), "Volume": quotes.get("volume", [])
-        }, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
-        df.dropna(subset=["Close", "Volume"], inplace=True)
-        return df.sort_index()
-    except:
-        return None
-
-def update_yesterday_results():
-    try:
-        sheet = connect_spreadsheet()
-        all_records = sheet.get_all_values()
-        cell_list = []
-        
-        for i, row in enumerate(all_records):
-            if i == 0 or len(row) < 7 or row[6] != "判定待ち": continue
-            code = row[1]
-            selected_price = int(row[3])
-            df = get_stock_data_fallback(code)
-            
-            if df is not None and len(df) >= 1:
-                next_close = int(df['Close'].iloc[-1])
-                if next_close == selected_price and len(df) >= 2:
-                    next_close = int(df['Close'].iloc[-2])
-                pct = ((next_close - selected_price) / selected_price) * 100
-                mark = "◎" if pct >= 2.0 else "◯" if pct > 0.1 else "▲" if pct >= -0.1 else "✕"
-                
-                # バッチ更新用にCellオブジェクトを作成
-                cell_list.append(gspread.Cell(i + 1, 5, next_close))
-                cell_list.append(gspread.Cell(i + 1, 6, mark))
-                cell_list.append(gspread.Cell(i + 1, 7, f"{pct:+.2f}%"))
-                print(f"【答え合わせ完了】{code}: {mark} ({pct:+.2f}%)")
-        
-        if cell_list:
-            sheet.update_cells(cell_list)
-            print(f"【システム】合計 {len(cell_list)//3} 件を一括更新しました。")
-    except Exception as e:
-        print(f"自動答え合わせエラー: {e}")
-        raise e
-
-def analyze_stock(symbol):
-    try:
-        df = get_stock_data_fallback(symbol)
-        if df is None or df.empty or len(df) < 100: return "SKIP"
-        if (pd.Timestamp.now() - df.index[-1]).days > 7: return "SKIP"
-        if df['Volume'].iloc[-1] < 50000: return "SKIP"
-        stats["pass_volume"] += 1
-
-        df['MA5'] = df['Close'].rolling(5).mean()
-        df['MA20'] = df['Close'].rolling(20).mean()
-        df['MA60'] = df['Close'].rolling(60).mean()
-        df['MA100'] = df['Close'].rolling(100).mean()
-        df['MA300'] = df['Close'].rolling(300).mean()
-        
-        today, yest, yest2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
-        close, open_p, high = today['Close'], today['Open'], today['High']
-        ma5_t, ma20_t, ma60_t, ma100_t, ma300_t = today['MA5'], today['MA20'], today['MA60'], today['MA100'], today['MA300']
-
-        ppp_label = ""
-        if ma300_t and (ma5_t > ma20_t > ma60_t > ma100_t > ma300_t): ppp_label = "★PPP "
-        elif (ma5_t > ma20_t > ma60_t > ma100_t): ppp_label = "★PPP(Short) "
-        stock_text = f"■ {symbol} | {int(close)}円"
-
-        if not (ma5_t < close) or close <= open_p: return "SKIP" 
-        stats["pass_kahanshin"] += 1
-        if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
-        stats["pass_tame"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "tame", "text": f"  3 {ppp_label}{stock_text}", "stage_name": "3. 溜め"}
-
-        if ma60_t <= yest['MA60']: return "SKIP" 
-        stats["pass_ma60_up"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "ma60_up", "text": f"  4 {ppp_label}{stock_text}", "stage_name": "4. 60日線右肩上がり"}
-
-        if ma100_t <= yest['MA100']: return "SKIP"
-        stats["pass_trend_align"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "trend_align", "text": f"  長 {ppp_label}{stock_text}", "stage_name": "5. 長期トレンド同期"}
-
-        if (high - close) >= ((close - open_p) * 1.5): return "SKIP"
-        stats["pass_upper_shadow"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "upper_shadow", "text": f"  ヒ {ppp_label}{stock_text}", "stage_name": "6. 上ヒゲ選別"}
-
-        if close >= df['High'].iloc[-6:-1].max(): stats["pass_new_high"] += 1
-        if close >= (df['High'].iloc[-100:].max() * 0.97): return "SKIP"
-        stats["pass_ceiling_avoid"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "ceiling_avoid", "text": f"  最終 {ppp_label}{stock_text}", "stage_name": "7. 天井圏回避(最終)"}
-
-        if "★PPP " in ppp_label: stats["★PPP"] += 1
-        elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
-        else: stats["normal_detect"] += 1
-        return f"{ppp_label}{stock_text}"
-    except: return "ERROR"
-
-def get_target_symbols(start, end):
-    return [str(i) for i in range(start, end)]
-
-def main():
-    start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
-    try:
-        if start_range == 1300:
-            update_yesterday_results()
-            time.sleep(2)
-        symbols = get_target_symbols(start_range, end_range)
-        for symbol in symbols: analyze_stock(symbol)
-        record_to_spreadsheet()
-        print("スキャン完了")
-    except Exception as e:
-        send_error_email(traceback.format_exc(), start_range, end_range)
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
+            "Open": quotes.get("open", []), "High
