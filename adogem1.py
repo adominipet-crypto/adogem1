@@ -17,7 +17,8 @@ stats = {
     "★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0
 }
 
-highest_stages = {}
+# 最終的に全条件をクリアした銘柄だけを格納する
+selected_stocks = {}
 
 def connect_spreadsheet():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -58,14 +59,12 @@ def record_to_spreadsheet():
         sheet = connect_spreadsheet()
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         new_rows = []
-        for code, data in highest_stages.items():
-            if data["stage_key"] == "tame":
-                continue
-                
+        for code, data in selected_stocks.items():
             price = data["price"]
             stage_name = data["stage_name"]
             ppp_status = data["ppp_label"].strip() if data["ppp_label"].strip() else "通常"
             
+            # 全条件をクリアしたものだけがここに来る
             new_rows.append([today_str, code, stage_name, ppp_status, price, "", "判定待ち", ""])
         if new_rows:
             new_rows.sort(key=lambda x: x[1])
@@ -139,7 +138,7 @@ def analyze_stock(symbol):
         last_data_date = df.index[-1].date()
         today_date = datetime.date.today()
         if (today_date - last_data_date).days > (3 if today_date.weekday() in [5, 6] else 1):
-            stats["pass_delay"] += 1  # 🌟 遅延ガードに引っかかった件数をカウント
+            stats["pass_delay"] += 1
             return "SKIP"
 
         if df['Volume'].iloc[-1] < 50000: return "SKIP"
@@ -163,7 +162,7 @@ def analyze_stock(symbol):
             
         stock_text = f"■ {symbol} | {int(close)}円"
 
-        # 精密な十字線（迷いのクロス）限定の回避ロジック
+        # 十字線回避ロジック
         day_range = high - low
         if day_range > 0:
             body_size = abs(close - open_p)
@@ -172,32 +171,37 @@ def analyze_stock(symbol):
                 low_box = min(close, open_p)
                 upper_shadow = high - high_box
                 lower_shadow = low_box - low
-                
                 if (upper_shadow / day_range) >= 0.25 and (lower_shadow / day_range) >= 0.25:
                     return "SKIP"
 
+        # 各フィルター（途中の最高ステージ保存はすべて除去）
         if not (ma5_t < close) or close <= open_p: return "SKIP" 
         stats["pass_kahanshin"] += 1
+        
         if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
         stats["pass_tame"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "tame", "text": f"  3 {ppp_label}{stock_text}", "stage_name": "3. 溜め", "ppp_label": ppp_label}
 
         if ma60_t <= yest['MA60']: return "SKIP" 
         stats["pass_ma60_up"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "ma60_up", "text": f"  4 {ppp_label}{stock_text}", "stage_name": "4. 60日線右肩上がり", "ppp_label": ppp_label}
 
         if ma100_t <= yest['MA100']: return "SKIP"
         stats["pass_trend_align"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "trend_align", "text": f"  長 {ppp_label}{stock_text}", "stage_name": "5. 長期トレンド同期", "ppp_label": ppp_label}
 
         if (high - close) >= ((close - open_p) * 1.5): return "SKIP"
         stats["pass_upper_shadow"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "upper_shadow", "text": f"  ヒ {ppp_label}{stock_text}", "stage_name": "6. 上ヒゲ選別", "ppp_label": ppp_label}
 
         if close >= df['High'].iloc[-6:-1].max(): stats["pass_new_high"] += 1
+        
         if close >= (df['High'].iloc[-100:].max() * 0.97): return "SKIP"
         stats["pass_ceiling_avoid"] += 1
-        highest_stages[symbol] = {"price": int(close), "stage_key": "ceiling_avoid", "text": f"  最終 {ppp_label}{stock_text}", "stage_name": "7. 天井圏回避(最終)", "ppp_label": ppp_label}
+
+        # 🌟 1〜7すべてのフィルターをクリアした銘柄（26件）だけをここで初めて格納する
+        selected_stocks[symbol] = {
+            "price": int(close), 
+            "text": f"  最終 {ppp_label}{stock_text}", 
+            "stage_name": "7. 天井圏回避(最終)", 
+            "ppp_label": ppp_label
+        }
 
         if "★PPP " in ppp_label: stats["★PPP"] += 1
         elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
@@ -218,33 +222,27 @@ def main():
         for symbol in symbols: analyze_stock(symbol)
         record_to_spreadsheet()
         
-        mail_lists = {"tame": [], "ma60_up": [], "trend_align": [], "upper_shadow": [], "ceiling_avoid": []}
-        for code, data in highest_stages.items():
-            key = data["stage_key"]
-            if key in mail_lists: mail_lists[key].append(data["text"])
+        # 最終合格銘柄の一覧を作成
+        detail_lines = []
+        for code, data in selected_stocks.items():
+            detail_lines.append(data["text"])
+            
+        detail_text = "\n".join(detail_lines) if detail_lines else "(該当なし)"
 
-        def list_str(lst): return "\n".join(lst) + "\n\n" if lst else "(該当なし)\n\n"
-        
-        valid_count = sum(1 for d in highest_stages.values() if d["stage_key"] != "tame")
-
-        # 🌟 「0.データ遅延」の項目をレポート本文に追加
+        # レポート本文
         body = f"総対象: {len(symbols)}\n\n" \
                f"0.データ遅延: {stats['pass_delay']}件\n" \
                f"1.出来高: {stats['pass_volume']}\n2.下半身: {stats['pass_kahanshin']}\n3.溜め: {stats['pass_tame']}\n" \
                f"4.60日線: {stats['pass_ma60_up']}\n5.長トレンド: {stats['pass_trend_align']}\n6.上ヒゲ: {stats['pass_upper_shadow']}\n" \
                f"5.新高値: {stats['pass_new_high']}\n7.天井圏回避: {stats['pass_ceiling_avoid']}\n\n" \
                f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
-               f"【詳細】\n" \
-               f"3.溜め: {len(mail_lists['tame'])}件\n\n" \
-               f"4.60日:\n{list_str(mail_lists['ma60_up'])}" \
-               f"5.長トレンド:\n{list_str(mail_lists['trend_align'])}" \
-               f"6.上ヒゲ:\n{list_str(mail_lists['upper_shadow'])}" \
-               f"7.天井回避:\n{list_str(mail_lists['ceiling_avoid'])}"
+               f"【詳細（全条件クリア銘柄一覧）】\n" \
+               f"{detail_text}"
 
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
         msg['To'] = SENDER_EMAIL
-        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 合致:{valid_count}件"
+        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 合致:{len(selected_stocks)}件"
         msg.attach(MIMEText(body, 'plain'))
         
         server = smtplib.SMTP("smtp.gmail.com", 587)
