@@ -12,7 +12,7 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 stats = {
-    "total_fetched": 0, "pass_volume": 0, "pass_kahanshin": 0, "pass_tame": 0,
+    "total_fetched": 0, "pass_delay": 0, "pass_volume": 0, "pass_kahanshin": 0, "pass_tame": 0,
     "pass_ma60_up": 0, "pass_trend_align": 0, "pass_upper_shadow": 0, "pass_new_high": 0, "pass_ceiling_avoid": 0,
     "★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0
 }
@@ -59,7 +59,6 @@ def record_to_spreadsheet():
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         new_rows = []
         for code, data in highest_stages.items():
-            # 🌟 最高達成ステージが「tame（3. 溜め）」の銘柄はスプレッドシートに書き込まない
             if data["stage_key"] == "tame":
                 continue
                 
@@ -67,7 +66,6 @@ def record_to_spreadsheet():
             stage_name = data["stage_name"]
             ppp_status = data["ppp_label"].strip() if data["ppp_label"].strip() else "通常"
             
-            # [日付(A), コード(B), ステージ名(C), PPP(D), 選定時終値(E), 翌日終値(F), 判定(G), 前日比(H)]
             new_rows.append([today_str, code, stage_name, ppp_status, price, "", "判定待ち", ""])
         if new_rows:
             new_rows.sort(key=lambda x: x[1])
@@ -136,7 +134,14 @@ def analyze_stock(symbol):
     try:
         df = get_stock_data_fallback(symbol)
         if df is None or df.empty or len(df) < 100: return "SKIP"
-        if (pd.Timestamp.now() - df.index[-1]).days > 7: return "SKIP"
+        
+        # データ遅延対策ガード
+        last_data_date = df.index[-1].date()
+        today_date = datetime.date.today()
+        if (today_date - last_data_date).days > (3 if today_date.weekday() in [5, 6] else 1):
+            stats["pass_delay"] += 1  # 🌟 遅延ガードに引っかかった件数をカウント
+            return "SKIP"
+
         if df['Volume'].iloc[-1] < 50000: return "SKIP"
         stats["pass_volume"] += 1
 
@@ -175,7 +180,6 @@ def analyze_stock(symbol):
         stats["pass_kahanshin"] += 1
         if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
         stats["pass_tame"] += 1
-        # ⭕ 最高達成ステージの判定用に一度格納する（後続で上書きされなければステージ3で確定）
         highest_stages[symbol] = {"price": int(close), "stage_key": "tame", "text": f"  3 {ppp_label}{stock_text}", "stage_name": "3. 溜め", "ppp_label": ppp_label}
 
         if ma60_t <= yest['MA60']: return "SKIP" 
@@ -214,7 +218,6 @@ def main():
         for symbol in symbols: analyze_stock(symbol)
         record_to_spreadsheet()
         
-        # 各ステージごとの銘柄格納リスト
         mail_lists = {"tame": [], "ma60_up": [], "trend_align": [], "upper_shadow": [], "ceiling_avoid": []}
         for code, data in highest_stages.items():
             key = data["stage_key"]
@@ -222,11 +225,11 @@ def main():
 
         def list_str(lst): return "\n".join(lst) + "\n\n" if lst else "(該当なし)\n\n"
         
-        # 🌟 件数タイトルに表示する件数は、スプレッドシートと同様に「3. 溜め」を除いた有効選定数にする
         valid_count = sum(1 for d in highest_stages.values() if d["stage_key"] != "tame")
 
-        # 🌟 件数のみ残し、詳細一覧からは「3.溜め」のブロックを非表示にする
+        # 🌟 「0.データ遅延」の項目をレポート本文に追加
         body = f"総対象: {len(symbols)}\n\n" \
+               f"0.データ遅延: {stats['pass_delay']}件\n" \
                f"1.出来高: {stats['pass_volume']}\n2.下半身: {stats['pass_kahanshin']}\n3.溜め: {stats['pass_tame']}\n" \
                f"4.60日線: {stats['pass_ma60_up']}\n5.長トレンド: {stats['pass_trend_align']}\n6.上ヒゲ: {stats['pass_upper_shadow']}\n" \
                f"5.新高値: {stats['pass_new_high']}\n7.天井圏回避: {stats['pass_ceiling_avoid']}\n\n" \
