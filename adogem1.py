@@ -59,6 +59,10 @@ def record_to_spreadsheet():
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         new_rows = []
         for code, data in highest_stages.items():
+            # 🌟 最高達成ステージが「tame（3. 溜め）」の銘柄はスプレッドシートに書き込まない
+            if data["stage_key"] == "tame":
+                continue
+                
             price = data["price"]
             stage_name = data["stage_name"]
             ppp_status = data["ppp_label"].strip() if data["ppp_label"].strip() else "通常"
@@ -154,19 +158,16 @@ def analyze_stock(symbol):
             
         stock_text = f"■ {symbol} | {int(close)}円"
 
-        # 🌟 精密な十字線（迷いのクロス）限定の回避ロジック
+        # 精密な十字線（迷いのクロス）限定の回避ロジック
         day_range = high - low
         if day_range > 0:
             body_size = abs(close - open_p)
-            # 実体が極小（5%未満）
             if (body_size / day_range) < 0.05:
                 high_box = max(close, open_p)
                 low_box = min(close, open_p)
                 upper_shadow = high - high_box
                 lower_shadow = low_box - low
                 
-                # 🌟 上ヒゲも下ヒゲも両方一定以上（25%以上）ある「売り買い拮抗の十字線」だけを除外
-                # ➔ これにより、下ヒゲだけが長い「強いピンバー」は除外されずに通過します
                 if (upper_shadow / day_range) >= 0.25 and (lower_shadow / day_range) >= 0.25:
                     return "SKIP"
 
@@ -174,6 +175,7 @@ def analyze_stock(symbol):
         stats["pass_kahanshin"] += 1
         if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
         stats["pass_tame"] += 1
+        # ⭕ 最高達成ステージの判定用に一度格納する（後続で上書きされなければステージ3で確定）
         highest_stages[symbol] = {"price": int(close), "stage_key": "tame", "text": f"  3 {ppp_label}{stock_text}", "stage_name": "3. 溜め", "ppp_label": ppp_label}
 
         if ma60_t <= yest['MA60']: return "SKIP" 
@@ -212,25 +214,34 @@ def main():
         for symbol in symbols: analyze_stock(symbol)
         record_to_spreadsheet()
         
+        # 各ステージごとの銘柄格納リスト
         mail_lists = {"tame": [], "ma60_up": [], "trend_align": [], "upper_shadow": [], "ceiling_avoid": []}
         for code, data in highest_stages.items():
             key = data["stage_key"]
             if key in mail_lists: mail_lists[key].append(data["text"])
 
         def list_str(lst): return "\n".join(lst) + "\n\n" if lst else "(該当なし)\n\n"
+        
+        # 🌟 件数タイトルに表示する件数は、スプレッドシートと同様に「3. 溜め」を除いた有効選定数にする
+        valid_count = sum(1 for d in highest_stages.values() if d["stage_key"] != "tame")
+
+        # 🌟 件数のみ残し、詳細一覧からは「3.溜め」のブロックを非表示にする
         body = f"総対象: {len(symbols)}\n\n" \
                f"1.出来高: {stats['pass_volume']}\n2.下半身: {stats['pass_kahanshin']}\n3.溜め: {stats['pass_tame']}\n" \
                f"4.60日線: {stats['pass_ma60_up']}\n5.長トレンド: {stats['pass_trend_align']}\n6.上ヒゲ: {stats['pass_upper_shadow']}\n" \
                f"5.新高値: {stats['pass_new_high']}\n7.天井圏回避: {stats['pass_ceiling_avoid']}\n\n" \
                f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
-               f"【詳細】\n3.溜め:\n{list_str(mail_lists['tame'])}4.60日:\n{list_str(mail_lists['ma60_up'])}" \
-               f"5.長トレンド:\n{list_str(mail_lists['trend_align'])}6.上ヒゲ:\n{list_str(mail_lists['upper_shadow'])}" \
+               f"【詳細】\n" \
+               f"3.溜め: {len(mail_lists['tame'])}件\n\n" \
+               f"4.60日:\n{list_str(mail_lists['ma60_up'])}" \
+               f"5.長トレンド:\n{list_str(mail_lists['trend_align'])}" \
+               f"6.上ヒゲ:\n{list_str(mail_lists['upper_shadow'])}" \
                f"7.天井回避:\n{list_str(mail_lists['ceiling_avoid'])}"
 
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
         msg['To'] = SENDER_EMAIL
-        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 合致:{len(highest_stages)}件"
+        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 合致:{valid_count}件"
         msg.attach(MIMEText(body, 'plain'))
         
         server = smtplib.SMTP("smtp.gmail.com", 587)
