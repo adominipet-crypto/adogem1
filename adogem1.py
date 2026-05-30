@@ -25,7 +25,7 @@ stats = {
     "★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0
 }
 
-# 最終的に全条件をクリアした銘柄だけを格納する
+# 条件をクリアした銘柄を格納する（4, 5, 6, 7のタイミングで保存・更新）
 selected_stocks = {}
 
 def connect_spreadsheet():
@@ -72,12 +72,13 @@ def record_to_spreadsheet():
             stage_name = data["stage_name"]
             ppp_status = data["ppp_label"].strip() if data["ppp_label"].strip() else "通常"
             
-            # 全条件をクリアしたものだけがここに来る
+            # 4, 5, 6, 7 いずれかの判定を持った銘柄をシートに書き込む
             new_rows.append([today_str, code, stage_name, ppp_status, price, "", "判定待ち", ""])
         if new_rows:
-            new_rows.sort(key=lambda x: x[1])
+            # ステージ順、コード順にソートして書き込み
+            new_rows.sort(key=lambda x: (x[2], x[1]))
             sheet.append_rows(new_rows, value_input_option='RAW')
-            print(f"【シート記録】{len(new_rows)} 件を追記しました。")
+            print(f"【シート記録】{len(new_rows)} 件（各ステージ通過分）を追記しました。")
     except Exception as e:
         print(f"シート記録エラー: {e}")
         raise e
@@ -198,27 +199,37 @@ def analyze_stock(symbol):
         # 4. 長トレンドフィルター
         if ma100_t <= yest['MA100']: return "SKIP"
         stats["pass_trend_align"] += 1
+        
+        # 【書き込み対象：4. 長トレンド】をクリアしたため格納
+        selected_stocks[symbol] = {
+            "price": int(close), 
+            "text": f"  最終 {ppp_label}{stock_text}", 
+            "stage_name": "4. 長トレンド", 
+            "ppp_label": ppp_label
+        }
 
         # 5. 上ヒゲフィルター
         if (high - close) >= ((close - open_p) * 1.5): return "SKIP"
         stats["pass_upper_shadow"] += 1
+        
+        # 【書き込み対象：5. 上ヒゲ】をクリアしたので更新
+        selected_stocks[symbol]["stage_name"] = "5. 上ヒゲ"
 
-        # 6. 天井圏回避フィルター（ロジックの連続性のために新高値の前に移動）
+        # 6. 天井圏回避フィルター
         if close >= (df['High'].iloc[-100:].max() * 0.97): return "SKIP"
         stats["pass_ceiling_avoid"] += 1
+        
+        # 【書き込み対象：6. 天井圏回避】をクリアしたので更新
+        selected_stocks[symbol]["stage_name"] = "6. 天井圏回避"
 
-        # 7. 新高値フィルター（ここで条件を満たさないものを除外(SKIP)するように修正）
+        # 7. 新高値フィルター（ここで完全に除外判定を行い、5件に絞り込む）
         if not (close >= df['High'].iloc[-6:-1].max()): return "SKIP"
         stats["pass_new_high"] += 1
+        
+        # 【書き込み対象：7. 新高値】まですべて突破した（最終ステージ）
+        selected_stocks[symbol]["stage_name"] = "7. 新高値(最終)"
 
-        # 🌟 すべてのフィルター（1〜7）をクリアした銘柄だけを格納
-        selected_stocks[symbol] = {
-            "price": int(close), 
-            "text": f"  最終 {ppp_label}{stock_text}", 
-            "stage_name": "7. 新高値(最終)", 
-            "ppp_label": ppp_label
-        }
-
+        # 各パターンの集計カウンタ（最終合格した5件のステータス）
         if "★PPP " in ppp_label: stats["★PPP"] += 1
         elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
         else: stats["normal_detect"] += 1
@@ -236,16 +247,19 @@ def main():
             time.sleep(2)
         symbols = get_target_symbols(start_range, end_range)
         for symbol in symbols: analyze_stock(symbol)
+        
+        # スプレッドシートへの記録を実行（4, 5, 6, 7の全ステージ対象）
         record_to_spreadsheet()
         
-        # 最終合格銘柄の一覧を作成
+        # メール詳細一覧には、すべてのフィルターを完全クリアした「7. 新高値(最終)」の銘柄のみ表示
         detail_lines = []
         for code, data in selected_stocks.items():
-            detail_lines.append(data["text"])
+            if data["stage_name"] == "7. 新高値(最終)":
+                detail_lines.append(data["text"])
             
         detail_text = "\n".join(detail_lines) if detail_lines else "(該当なし)"
 
-        # レポート本文（ナンバリングを0〜7に完全修正）
+        # レポート本文（0〜7に完全対応させ、件数の矛盾も解消）
         body = f"総対象: {len(symbols)}\n\n" \
                f"0.データ遅延: {stats['pass_delay']}件\n" \
                f"0.出来高: {stats['pass_volume']}件\n" \
@@ -263,7 +277,7 @@ def main():
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
         msg['To'] = SENDER_EMAIL
-        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 合致:{len(selected_stocks)}件"
+        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 最終合致:{stats['pass_new_high']}件"
         msg.attach(MIMEText(body, 'plain'))
         
         server = smtplib.SMTP("smtp.gmail.com", 587)
