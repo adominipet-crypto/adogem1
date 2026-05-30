@@ -11,9 +11,17 @@ from google.oauth2.service_account import Credentials
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
+# 統計カウンタの初期化
 stats = {
-    "total_fetched": 0, "pass_delay": 0, "pass_volume": 0, "pass_kahanshin": 0, "pass_tame": 0,
-    "pass_ma60_up": 0, "pass_trend_align": 0, "pass_upper_shadow": 0, "pass_new_high": 0, "pass_ceiling_avoid": 0,
+    "pass_delay": 0,       # 0. データ遅延
+    "pass_volume": 0,      # 0. 出来高
+    "pass_kahanshin": 0,   # 1. 下半身
+    "pass_tame": 0,        # 2. 溜め
+    "pass_ma60_up": 0,     # 3. 60日線
+    "pass_trend_align": 0, # 4. 長トレンド
+    "pass_upper_shadow": 0,# 5. 上ヒゲ
+    "pass_ceiling_avoid": 0,# 6. 天井圏回避
+    "pass_new_high": 0,    # 7. 新高値
     "★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0
 }
 
@@ -134,13 +142,14 @@ def analyze_stock(symbol):
         df = get_stock_data_fallback(symbol)
         if df is None or df.empty or len(df) < 100: return "SKIP"
         
-        # データ遅延対策ガード
+        # 0. データ遅延対策ガード
         last_data_date = df.index[-1].date()
         today_date = datetime.date.today()
         if (today_date - last_data_date).days > (3 if today_date.weekday() in [5, 6] else 1):
             stats["pass_delay"] += 1
             return "SKIP"
 
+        # 0. 出来高フィルター
         if df['Volume'].iloc[-1] < 50000: return "SKIP"
         stats["pass_volume"] += 1
 
@@ -174,32 +183,39 @@ def analyze_stock(symbol):
                 if (upper_shadow / day_range) >= 0.25 and (lower_shadow / day_range) >= 0.25:
                     return "SKIP"
 
-        # 各フィルター（途中の最高ステージ保存はすべて除去）
+        # 1. 下半身フィルター
         if not (ma5_t < close) or close <= open_p: return "SKIP" 
         stats["pass_kahanshin"] += 1
         
+        # 2. 溜めフィルター
         if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
         stats["pass_tame"] += 1
 
+        # 3. 60日線フィルター
         if ma60_t <= yest['MA60']: return "SKIP" 
         stats["pass_ma60_up"] += 1
 
+        # 4. 長トレンドフィルター
         if ma100_t <= yest['MA100']: return "SKIP"
         stats["pass_trend_align"] += 1
 
+        # 5. 上ヒゲフィルター
         if (high - close) >= ((close - open_p) * 1.5): return "SKIP"
         stats["pass_upper_shadow"] += 1
 
-        if close >= df['High'].iloc[-6:-1].max(): stats["pass_new_high"] += 1
-        
+        # 6. 天井圏回避フィルター（ロジックの連続性のために新高値の前に移動）
         if close >= (df['High'].iloc[-100:].max() * 0.97): return "SKIP"
         stats["pass_ceiling_avoid"] += 1
 
-        # 🌟 1〜7すべてのフィルターをクリアした銘柄（26件）だけをここで初めて格納する
+        # 7. 新高値フィルター（ここで条件を満たさないものを除外(SKIP)するように修正）
+        if not (close >= df['High'].iloc[-6:-1].max()): return "SKIP"
+        stats["pass_new_high"] += 1
+
+        # 🌟 すべてのフィルター（1〜7）をクリアした銘柄だけを格納
         selected_stocks[symbol] = {
             "price": int(close), 
             "text": f"  最終 {ppp_label}{stock_text}", 
-            "stage_name": "7. 天井圏回避(最終)", 
+            "stage_name": "7. 新高値(最終)", 
             "ppp_label": ppp_label
         }
 
@@ -229,12 +245,17 @@ def main():
             
         detail_text = "\n".join(detail_lines) if detail_lines else "(該当なし)"
 
-        # レポート本文
+        # レポート本文（ナンバリングを0〜7に完全修正）
         body = f"総対象: {len(symbols)}\n\n" \
                f"0.データ遅延: {stats['pass_delay']}件\n" \
-               f"1.出来高: {stats['pass_volume']}\n2.下半身: {stats['pass_kahanshin']}\n3.溜め: {stats['pass_tame']}\n" \
-               f"4.60日線: {stats['pass_ma60_up']}\n5.長トレンド: {stats['pass_trend_align']}\n6.上ヒゲ: {stats['pass_upper_shadow']}\n" \
-               f"5.新高値: {stats['pass_new_high']}\n7.天井圏回避: {stats['pass_ceiling_avoid']}\n\n" \
+               f"0.出来高: {stats['pass_volume']}件\n" \
+               f"1.下半身: {stats['pass_kahanshin']}件\n" \
+               f"2.溜め: {stats['pass_tame']}件\n" \
+               f"3.60日線: {stats['pass_ma60_up']}件\n" \
+               f"4.長トレンド: {stats['pass_trend_align']}件\n" \
+               f"5.上ヒゲ: {stats['pass_upper_shadow']}件\n" \
+               f"6.天井圏回避: {stats['pass_ceiling_avoid']}件\n" \
+               f"7.新高値: {stats['pass_new_high']}件\n\n" \
                f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
                f"【詳細（全条件クリア銘柄一覧）】\n" \
                f"{detail_text}"
