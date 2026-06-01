@@ -2,15 +2,14 @@ name: adoGEM Full Scan Continuous
 
 on:
   schedule:
-    # 祝日を除く月〜金、日本時間20:00（UTC 11:00）に自動起動
-    - cron: '0 11 * * 1-5'
+    # 🌟 祝日を除く月〜金、日本時間21:00（UTC 12:00）に自動起動するように変更
+    - cron: '0 12 * * 1-5'
   workflow_dispatch: # 手動実行ボタン
 
 jobs:
   scan-and-report:
     runs-on: ubuntu-latest
     steps:
-      # 🌟 アクションのバージョンを最新版（v4, v5）に指定
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -29,7 +28,3 @@ jobs:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          # 🌟 GitHubが推奨するNode.js 24強制オプションを追加して警告を完全消去
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-        run: |
-          python adogem1.py 1300 10001
