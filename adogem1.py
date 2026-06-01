@@ -218,4 +218,17 @@ def update_yesterday_results():
 def analyze_stock(symbol):
     try:
         df = get_stock_data_fallback(symbol)
-        if df is None or df.empty or
+        # 🌟 文法エラー（末尾のor）をきれいに削除・修正しました
+        if df is None or df.empty or len(df) < 100: return "SKIP"
+        
+        # データ遅延ガードの緩和（21時実行時の安全マージンとして5日分の猶予を設定）
+        last_data_date = df.index[-1].date()
+        today_date = datetime.date.today()
+        if (today_date - last_data_date).days > 5:
+            stats["pass_delay"] += 1
+            return "SKIP"
+
+        if df['Volume'].iloc[-1] < 50000: return "SKIP"
+
+        df['MA5'] = df['Close'].rolling(5).mean()
+        df
