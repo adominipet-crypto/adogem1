@@ -209,3 +209,13 @@ def update_yesterday_results():
                 print(f"【答え合わせ完了】シート1 {code}: {mark} ({pct:+.2f}%)")
         
         if cell_list:
+            sheet.update_cells(cell_list)
+            print(f"【システム】シート1の合計 {len(cell_list)//3} 件を一括更新しました。")
+    except Exception as e:
+        print(f"自動答え合わせエラー: {e}")
+        raise e
+
+def analyze_stock(symbol):
+    try:
+        df = get_stock_data_fallback(symbol)
+        if df is None or df.empty or
