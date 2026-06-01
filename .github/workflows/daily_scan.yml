@@ -2,7 +2,7 @@ name: adoGEM Full Scan Continuous
 
 on:
   schedule:
-    # 🌟 祝日を除く月〜金、日本時間21:00（UTC 12:00）に自動起動するように変更
+    # 🌟 祝日を除く月〜金、日本時間21:00（UTC 12:00）に自動起動
     - cron: '0 12 * * 1-5'
   workflow_dispatch: # 手動実行ボタン
 
@@ -28,3 +28,7 @@ jobs:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          # 🌟 GitHub推奨のNode.js 24強制オプション（警告消去用）
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+        run: |
+          python adogem1.py 1300 10001
