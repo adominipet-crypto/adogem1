@@ -218,8 +218,8 @@ def update_yesterday_results():
 def analyze_stock(symbol):
     try:
         df = get_stock_data_fallback(symbol)
-        # 🌟 文法エラー（末尾のor）をきれいに削除・修正しました
-        if df is None or df.empty or len(df) < 100: return "SKIP"
+        if df is None or df.empty or len(df) < 100:
+            return "SKIP"
         
         # データ遅延ガードの緩和（21時実行時の安全マージンとして5日分の猶予を設定）
         last_data_date = df.index[-1].date()
@@ -228,7 +228,147 @@ def analyze_stock(symbol):
             stats["pass_delay"] += 1
             return "SKIP"
 
-        if df['Volume'].iloc[-1] < 50000: return "SKIP"
+        if df['Volume'].iloc[-1] < 50000:
+            return "SKIP"
 
         df['MA5'] = df['Close'].rolling(5).mean()
-        df
+        df['MA20'] = df['Close'].rolling(20).mean()
+        df['MA60'] = df['Close'].rolling(60).mean()
+        df['MA100'] = df['Close'].rolling(100).mean()
+        df['MA300'] = df['Close'].rolling(300).mean() if len(df) >= 300 else None
+        
+        today, yest, yest2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
+        close, open_p, high, low = today['Close'], today['Open'], today['High'], today['Low']
+        ma5_t, ma20_t, ma60_t, ma100_t, ma300_t = today['MA5'], today['MA20'], today['MA60'], today['MA100'], today['MA300']
+
+        ppp_label = ""
+        if ma300_t is not None and pd.notna(ma300_t) and (ma5_t > ma20_t > ma60_t > ma100_t > ma300_t): 
+            ppp_label = "★PPP "
+        elif (ma5_t > ma20_t > ma60_t > ma100_t): 
+            ppp_label = "★PPP(Short) "
+            
+        stock_text = f"■ {symbol} | {int(close)}円"
+
+        if day_range := high - low:
+            body_size = abs(close - open_p)
+            if (body_size / day_range) < 0.05:
+                high_box, low_box = max(close, open_p), min(close, open_p)
+                if ((high - high_box) / day_range) >= 0.25 and ((low_box - low) / day_range) >= 0.25:
+                    return "SKIP"
+
+        # 1〜2. 下半身 判定
+        if not (ma5_t < close) or close <= open_p:
+            return "SKIP" 
+        
+        # 3. 溜め 判定
+        if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']):
+            return "SKIP"
+
+        # 4. 60日線
+        if ma60_t <= yest['MA60']: 
+            return "SKIP" 
+        highest_stages[symbol] = {"price": int(close), "stage_key": "ma60_up", "ppp_label": ppp_label}
+
+        # 5. 長トレンド
+        if ma100_t <= yest['MA100']: 
+            return "SKIP"
+        highest_stages[symbol] = {"price": int(close), "stage_key": "trend_align", "ppp_label": ppp_label}
+
+        # 6. 上ヒゲ
+        if (high - close) >= ((close - open_p) * 1.5): 
+            return "SKIP"
+        highest_stages[symbol] = {"price": int(close), "stage_key": "upper_shadow", "ppp_label": ppp_label}
+
+        # 5.(新高値カウント)
+        if close >= df['High'].iloc[-6:-1].max(): 
+            stats["pass_new_high"] += 1
+        
+        # 7. 天井圏回避
+        if close >= (df['High'].iloc[-100:].max() * 0.97): 
+            return "SKIP"
+        
+        # 7まで完全突破（合格銘柄として上書き保存）
+        highest_stages[symbol] = {"price": int(close), "stage_key": "ceiling_avoid", "ppp_label": ppp_label}
+
+        selected_stocks[symbol] = {
+            "price": int(close), 
+            "stage_name": "7. 天井圏回避(最終)", 
+            "ppp_label": ppp_label
+        }
+
+        if "★PPP " in ppp_label: stats["★PPP"] += 1
+        elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
+        else: stats["normal_detect"] += 1
+        return f"{ppp_label}{stock_text}"
+    except:
+        return "ERROR"
+
+def get_target_symbols(start, end):
+    return [str(i) for i in range(start, end)]
+
+def main():
+    start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
+    try:
+        if start_range == 1300:
+            update_yesterday_results()
+            time.sleep(2)
+        symbols = get_target_symbols(start_range, end_range)
+        for symbol in symbols:
+            analyze_stock(symbol)
+        
+        # 1.出来高 の実集計（総対象から遅延を除外した実数）
+        stats["pass_volume"] = len(symbols) - stats["pass_delay"]
+        
+        # スプレッドシートへの個別書き込み
+        record_to_spreadsheet() # シート1
+        record_to_sheet2()      # シート2
+        
+        # メール出力用のリスト整形
+        stages_output = {"ma60_up": [], "trend_align": [], "upper_shadow": [], "ceiling_avoid": []}
+        for code, data in highest_stages.items():
+            k = data["stage_key"]
+            ppp = data["ppp_label"]
+            item_str = f"  ■ {code} | {data['price']}円" if not ppp else f"  {ppp}■ {code} | {data['price']}円"
+            stages_output[k].append(item_str)
+
+        # 各関門のカウンター数値を、詳細リストの実件数と厳密に同期（集計不整合を100%解決）
+        stats["pass_ma60_up"] = len(stages_output["ma60_up"])
+        stats["pass_trend_align"] = len(stages_output["trend_align"])
+        stats["pass_upper_shadow"] = len(stages_output["upper_shadow"])
+        stats["pass_ceiling_avoid"] = len(stages_output["ceiling_avoid"])
+
+        body = f"総対象: {len(symbols)}\n\n" \
+               f"0.データ遅延: {stats['pass_delay']}件\n" \
+               f"1.出来高: {stats['pass_volume']}\n\n" \
+               f"【各ステージで留まった(脱落・合格)件数】\n" \
+               f"4.60日線クリア(次で脱落): {stats['pass_ma60_up']}\n" \
+               f"5.長トレンドクリア(次で脱落): {stats['pass_trend_align']}\n" \
+               f"6.上ヒゲクリア(次で脱落): {stats['pass_upper_shadow']}\n" \
+               f"5.新高値更新(参考): {stats['pass_new_high']}\n" \
+               f"7.天井圏回避(最終合格): {stats['pass_ceiling_avoid']}\n\n" \
+               f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
+               f"【詳細】\n" \
+               f"4.60日:\n" + "\n".join(stages_output["ma60_up"]) + "\n\n" \
+               f"5.長トレンド:\n" + "\n".join(stages_output["trend_align"]) + "\n\n" \
+               f"6.上ヒゲ:\n" + "\n".join(stages_output["upper_shadow"]) + "\n\n" \
+               f"7.天井回避:\n" + "\n".join(stages_output["ceiling_avoid"])
+
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = SENDER_EMAIL
+        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 合格:{stats['pass_ceiling_avoid']}件"
+        msg.attach(MIMEText(body, 'plain'))
+        
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print("スキャンおよびレポートメール送信完了")
+        
+    except Exception as e:
+        send_error_email(traceback.format_exc(), start_range, end_range)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
