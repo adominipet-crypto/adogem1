@@ -11,7 +11,7 @@ from google.oauth2.service_account import Credentials
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
-# 全てが連番・ステップ式の合格カウンタ（一本道のピラミッド型に完全リニューアル）
+# 全てが連番・ステップ式の合格カウンタ（一本道のピラミッド型）
 stats = {
     "stage0_fetched": 0,      # 0. 全データ取得成功
     "stage1_volume": 0,       # 1. 出来高クリア
@@ -25,8 +25,8 @@ stats = {
     "★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0
 }
 
-# シート1への全書き込みログを一時保存するリスト (7と8の重複記載に対応)
-sheet1_log_rows = []
+# 🌟【修正】重複を排除し、1銘柄につき最終判定のみを保持する辞書
+sheet1_final_log = {}
 # ステージ8まで完全クリアした最終規定合格銘柄のみを保持する辞書（シート2用）
 selected_stocks = {}
 
@@ -65,7 +65,7 @@ def send_error_email(error_message, start_range, end_range):
         print(f"エラーメール送信失敗: {e}")
 
 def get_stock_data_fallback(symbol):
-    """ 🌟【自立型・照合検証プロセス】
+    """ 【自立型・照合検証プロセス】
         取得データの最終日付が本日(実行日)の東証データと完全一致しているか、
         データに不自然な暫定値（PTSノイズ等）が含まれていないかを二重に照合・補正します。
     """
@@ -86,7 +86,7 @@ def get_stock_data_fallback(symbol):
         }, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
         
         df.dropna(subset=["Close", "Volume"], inplace=True)
-        df = df[df['Volume'] > 0] # 出来高0の異常値をカット
+        df = df[df['Volume'] > 0] 
         df = df.sort_index()
         
         if df.empty or len(df) < 100: return None
@@ -95,12 +95,10 @@ def get_stock_data_fallback(symbol):
         last_data_date_str = df.index[-1].strftime("%Y-%m-%d")
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         
-        # 配信データの最新日が「本日」ではない（更新遅延など）場合は、誤った古い数字を書き込まないよう除外する
         if last_data_date_str != today_str:
             return None
             
         # ──【照合チェック2: PTS等の暫定ノイズ排除】──
-        # 直前行と終値・高値が完全に同一で、出来高が極端に少ない深夜のダミーデータ行がある場合は切り落とす
         last_row = df.iloc[-1]
         prev_row = df.iloc[-2]
         if last_row['Close'] == prev_row['Close'] and last_row['High'] == prev_row['High'] and last_row['Volume'] < 100:
@@ -111,14 +109,13 @@ def get_stock_data_fallback(symbol):
         return None
 
 def record_to_spreadsheet():
-    """ 🌟 シート1へ記録：ステージ7と8の両方を共存させて正確に追記する """
+    """ 🌟 シート1へ記録：1銘柄につき、その日の「最高到達（最終判定）ステージ」のみを1行だけ追記する """
     try:
         sheet = connect_spreadsheet("シート1")
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         new_rows = []
         
-        for row_data in sheet1_log_rows:
-            code = row_data["code"]
+        for code, row_data in sheet1_final_log.items():
             price = row_data["price"]
             stage_key = row_data["stage_key"]
             ppp_status = row_data["ppp_label"].strip() if row_data["ppp_label"].strip() else "通常"
@@ -134,10 +131,10 @@ def record_to_spreadsheet():
             new_rows.append([today_str, code, stage_name, ppp_status, price, "", "判定待ち", ""])
             
         if new_rows:
-            # 銘柄コード、およびステージのステップ順にソートして一括追記
-            new_rows.sort(key=lambda x: (x[1], x[2]))
+            # 銘柄コード順にソートして一括追記
+            new_rows.sort(key=lambda x: x[1])
             sheet.append_rows(new_rows, value_input_option='RAW')
-            print(f"【シート1記録】個別ログ（7と8の重複記載を含む）を計 {len(new_rows)} 件追記しました。")
+            print(f"【シート1記録】個別ログ（重複なし最終判定のみ）を計 {len(new_rows)} 件追記しました。")
     except Exception as e:
         print(f"シート1記録エラー: {e}")
         raise e
@@ -173,24 +170,24 @@ def record_to_sheet2():
             ppp_status = data["ppp_label"].strip() if data["ppp_label"].strip() else "通常"
             
             # --- 1行目（上段） ---
-            cell_updates.append(gspread.Cell(r, 1, today_str))            # A1: 日付
-            cell_updates.append(gspread.Cell(r, 2, code))                 # B1: 銘柄コード
-            cell_updates.append(gspread.Cell(r, 3, price))                # C1: 選定時終値
-            cell_updates.append(gspread.Cell(r, 4, ""))                   # D1
-            cell_updates.append(gspread.Cell(r, 5, "翌日終値"))           # E1
+            cell_updates.append(gspread.Cell(r, 1, today_str))            
+            cell_updates.append(gspread.Cell(r, 2, code))                 
+            cell_updates.append(gspread.Cell(r, 3, price))                
+            cell_updates.append(gspread.Cell(r, 4, ""))                   
+            cell_updates.append(gspread.Cell(r, 5, "翌日終値"))           
             
             for day in range(3, 16):
                 cell_updates.append(gspread.Cell(r, 3 + day, f"{day}営業日"))
                 
-            cell_updates.append(gspread.Cell(r, 19, "差額(対選定)"))       # S1
-            cell_updates.append(gspread.Cell(r, 20, "判定(対選定)"))       # T1
-            cell_updates.append(gspread.Cell(r, 21, "比率(%)"))            # U1
+            cell_updates.append(gspread.Cell(r, 19, "差額(対選定)"))       
+            cell_updates.append(gspread.Cell(r, 20, "判定(対選定)"))       
+            cell_updates.append(gspread.Cell(r, 21, "比率(%)"))            
 
             # --- 2行目（中段）通過条件を「8. 新高値更新」のみに固定 ---
-            cell_updates.append(gspread.Cell(r + 1, 1, "通過条件ステージ")) # A2
-            cell_updates.append(gspread.Cell(r + 1, 2, "8. 新高値更新"))    # B2
-            cell_updates.append(gspread.Cell(r + 1, 4, ""))                 # D2
-            cell_updates.append(gspread.Cell(r + 1, 5, "判定待ち"))         # E2
+            cell_updates.append(gspread.Cell(r + 1, 1, "通過条件ステージ")) 
+            cell_updates.append(gspread.Cell(r + 1, 2, "8. 新高値更新"))    
+            cell_updates.append(gspread.Cell(r + 1, 4, ""))                 
+            cell_updates.append(gspread.Cell(r + 1, 5, "判定待ち"))         
 
             for day in range(3, 16):
                 cell_updates.append(gspread.Cell(r + 1, 3 + day, "判定"))
@@ -200,9 +197,9 @@ def record_to_sheet2():
             cell_updates.append(gspread.Cell(r + 1, 21, "比率枠"))
 
             # --- 3行目（下段）トレンド状態（PPP）をここに記載 ---
-            cell_updates.append(gspread.Cell(r + 2, 1, "PPP"))              # A3
-            cell_updates.append(gspread.Cell(r + 2, 2, ppp_status))         # B3
-            cell_updates.append(gspread.Cell(r + 2, 5, "前日比(%)"))        # E3
+            cell_updates.append(gspread.Cell(r + 2, 1, "PPP"))              
+            cell_updates.append(gspread.Cell(r + 2, 2, ppp_status))         
+            cell_updates.append(gspread.Cell(r + 2, 5, "前日比(%)"))        
             
             for day in range(3, 16):
                 cell_updates.append(gspread.Cell(r + 2, 3 + day, "前日比(%)"))
@@ -239,7 +236,6 @@ def update_yesterday_results():
             
             if df is not None and len(df) >= 1:
                 next_close = int(df['Close'].iloc[-1])
-                # 同一日データの誤判定防止巻き戻し
                 if next_close == selected_price and len(df) >= 2:
                     next_close = int(df['Close'].iloc[-2])
                 pct = ((next_close - selected_price) / selected_price) * 100
@@ -309,27 +305,28 @@ def analyze_stock(symbol):
         # 4. 60日線クリア
         if ma60_t <= yest['MA60']: return "SKIP" 
         stats["stage4_ma60"] += 1
-        sheet1_log_rows.append({"code": symbol, "price": int(close), "stage_key": "ma60_up", "ppp_label": ppp_label})
+        # 一時保存（上書き対応用の辞書構造）
+        sheet1_final_log[symbol] = {"price": int(close), "stage_key": "ma60_up", "ppp_label": ppp_label}
 
         # 5. 長トレンドクリア
         if ma100_t <= yest['MA100']: return "SKIP"
         stats["stage5_trend"] += 1
-        sheet1_log_rows.append({"code": symbol, "price": int(close), "stage_key": "trend_align", "ppp_label": ppp_label})
+        sheet1_final_log[symbol] = {"price": int(close), "stage_key": "trend_align", "ppp_label": ppp_label}
 
         # 6. 上ヒゲクリア
         if (high - close) >= ((close - open_p) * 1.5): return "SKIP"
         stats["stage6_upper"] += 1
-        sheet1_log_rows.append({"code": symbol, "price": int(close), "stage_key": "upper_shadow", "ppp_label": ppp_label})
+        sheet1_final_log[symbol] = {"price": int(close), "stage_key": "upper_shadow", "ppp_label": ppp_label}
         
         # 7. 天井圏回避クリア
         if close >= (df['High'].iloc[-100:].max() * 0.97): return "SKIP"
         stats["stage7_ceiling"] += 1
-        sheet1_log_rows.append({"code": symbol, "price": int(close), "stage_key": "ceiling_avoid", "ppp_label": ppp_label})
+        sheet1_final_log[symbol] = {"price": int(close), "stage_key": "ceiling_avoid", "ppp_label": ppp_label}
 
         # 8. 新高値更新（規定の最終合格ステージ）
         if close < df['High'].iloc[-6:-1].max(): return "SKIP"
         stats["stage8_new_high"] += 1
-        sheet1_log_rows.append({"code": symbol, "price": int(close), "stage_key": "new_high_pass", "ppp_label": ppp_label})
+        sheet1_final_log[symbol] = {"price": int(close), "stage_key": "new_high_pass", "ppp_label": ppp_label}
 
         # 最終規定合格（ステージ8完全突破）をシート2用に保存
         selected_stocks[symbol] = {
@@ -350,7 +347,6 @@ def get_target_symbols(start, end):
 def main():
     start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
     try:
-        # スキャン範囲が最初のブロック(1300-)の場合のみ、前日結果の答え合わせを先行実行
         if start_range == 1300:
             update_yesterday_results()
             time.sleep(2)
@@ -360,15 +356,15 @@ def main():
             analyze_stock(symbol)
         
         # スプレッドシートへの永続化
-        record_to_spreadsheet() # シート1 (7, 8共記載)
+        record_to_spreadsheet() # シート1 (最終判定のみ1行)
         record_to_sheet2()      # シート2 (8のみ記載)
         
-        # レポートメール配信用詳細テキスト生成
+        # 🌟【修正】メール配信用詳細テキストも最終留まりステージごとに綺麗に仕分け
         stages_output = {"ma60_up": [], "trend_align": [], "upper_shadow": [], "ceiling_avoid": [], "new_high_pass": []}
-        for row_data in sheet1_log_rows:
+        for code, row_data in sheet1_final_log.items():
             k = row_data["stage_key"]
             ppp = row_data["ppp_label"]
-            item_str = f"  ■ {row_data['code']} | {row_data['price']}円" if not ppp else f"  {ppp}■ {row_data['code']} | {row_data['price']}円"
+            item_str = f"  ■ {code} | {row_data['price']}円" if not ppp else f"  {ppp}■ {code} | {row_data['price']}円"
             stages_output[k].append(item_str)
 
         # メール本文の組み立て
@@ -384,11 +380,11 @@ def main():
                f"7. 天井圏回避クリア: {stats['stage7_ceiling']}件\n" \
                f"8. 新高値更新(最終合格): {stats['stage8_new_high']}件\n\n" \
                f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
-               f"【詳細（ステージ4以降）】\n" \
-               f"4.60日線クリア時点の銘柄:\n" + "\n".join(stages_output["ma60_up"]) + "\n\n" \
-               f"5.長トレンドクリア時点の銘柄:\n" + "\n".join(stages_output["trend_align"]) + "\n\n" \
-               f"6.上ヒゲクリア時点の銘柄:\n" + "\n".join(stages_output["upper_shadow"]) + "\n\n" \
-               f"7.天井回避クリア時点の銘柄:\n" + "\n".join(stages_output["ceiling_avoid"]) + "\n\n" \
+               f"【詳細（各銘柄の最終判定ステージ）】\n" \
+               f"4.60日線クリアで留まった銘柄:\n" + "\n".join(stages_output["ma60_up"]) + "\n\n" \
+               f"5.長トレンドクリアで留まった銘柄:\n" + "\n".join(stages_output["trend_align"]) + "\n\n" \
+               f"6.上ヒゲクリアで留まった銘柄:\n" + "\n".join(stages_output["upper_shadow"]) + "\n\n" \
+               f"7.天井回避クリアで留まった銘柄:\n" + "\n".join(stages_output["ceiling_avoid"]) + "\n\n" \
                f"8.新高値更新(最終確定合格)の銘柄:\n" + "\n".join(stages_output["new_high_pass"])
 
         msg = MIMEMultipart()
