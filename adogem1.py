@@ -7,6 +7,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os, time, sys, datetime, gspread, json, requests, traceback
 from google.oauth2.service_account import Credentials
+from gspread.exceptions import APIError  # エラー検知用に追加
 
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
@@ -25,12 +26,16 @@ stats = {
     "★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0
 }
 
-# 🌟【修正】重複を排除し、1銘柄につき最終判定のみを保持する辞書
+# 重複を排除し、1銘柄につき最終判定のみを保持する辞書
 sheet1_final_log = {}
 # ステージ8まで完全クリアした最終規定合格銘柄のみを保持する辞書（シート2用）
 selected_stocks = {}
 
 def connect_spreadsheet(sheet_name="シート1"):
+    """ 🌟【リトライプロセスの追加】
+        Googleサーバー側の一時的な503エラーや過負荷に対し、
+        数秒の待機を挟みながら最大5回まで自律的に接続を再試行します。
+    """
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     secret_key = os.environ.get('GCP_SA_KEY')
     if secret_key:
@@ -38,7 +43,28 @@ def connect_spreadsheet(sheet_name="シート1"):
         creds = Credentials.from_service_account_info(info, scopes=scopes)
     else:
         creds = Credentials.from_service_account_file("google_credentials.json", scopes=scopes)
-    return gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ").worksheet(sheet_name)
+    
+    max_retries = 5
+    backoff_factor = 3  # 再試行ごとの待機倍率
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            client = gspread.authorize(creds)
+            return client.open("26.5.23_adoGEM_検証ログ").worksheet(sheet_name)
+        except APIError as e:
+            # 500番台エラー（503等）または429（リクエスト過多）の場合はリトライ
+            if e.response.status_code in [500, 502, 503, 504, 429] and attempt < max_retries:
+                sleep_time = attempt * backoff_factor
+                print(f"【⚠️Google APIエラー {e.response.status_code}】サーバーが一時的に不安定です。")
+                print(f"  --> {sleep_time}秒後に自動再試行します（試行 {attempt}/{max_retries}）")
+                time.sleep(sleep_time)
+            else:
+                raise e  # 限界回数を超えた、または回復不能なエラーの場合は上位へ投げる
+        except Exception as e:
+            if attempt < max_retries:
+                time.sleep(attempt * backoff_factor)
+            else:
+                raise e
 
 def send_error_email(error_message, start_range, end_range):
     msg = MIMEMultipart()
@@ -131,7 +157,6 @@ def record_to_spreadsheet():
             new_rows.append([today_str, code, stage_name, ppp_status, price, "", "判定待ち", ""])
             
         if new_rows:
-            # 銘柄コード順にソートして一括追記
             new_rows.sort(key=lambda x: x[1])
             sheet.append_rows(new_rows, value_input_option='RAW')
             print(f"【シート1記録】個別ログ（重複なし最終判定のみ）を計 {len(new_rows)} 件追記しました。")
@@ -259,14 +284,11 @@ def analyze_stock(symbol):
         df = get_stock_data_fallback(symbol)
         if df is None: return "SKIP"
         
-        # 0. 全データ取得成功
         stats["stage0_fetched"] += 1
 
-        # 1. 出来高クリア（5万株以上）
         if df['Volume'].iloc[-1] < 50000: return "SKIP"
         stats["stage1_volume"] += 1
 
-        # テクニカル指標生成
         df['MA5'] = df['Close'].rolling(5).mean()
         df['MA20'] = df['Close'].rolling(20).mean()
         df['MA60'] = df['Close'].rolling(60).mean()
@@ -277,7 +299,6 @@ def analyze_stock(symbol):
         close, open_p, high, low = today['Close'], today['Open'], today['High'], today['Low']
         ma5_t, ma20_t, ma60_t, ma100_t, ma300_t = today['MA5'], today['MA20'], today['MA60'], today['MA100'], today['MA300']
 
-        # トレンド状態マーク判定
         ppp_label = ""
         if ma300_t is not None and pd.notna(ma300_t) and (ma5_t > ma20_t > ma60_t > ma100_t > ma300_t): 
             ppp_label = "★PPP "
@@ -286,7 +307,6 @@ def analyze_stock(symbol):
             
         stock_text = f"■ {symbol} | {int(close)}円"
 
-        # 十字架・不連続ローソクの排除
         if day_range := high - low:
             body_size = abs(close - open_p)
             if (body_size / day_range) < 0.05:
@@ -294,41 +314,32 @@ def analyze_stock(symbol):
                 if ((high - high_box) / day_range) >= 0.25 and ((low_box - low) / day_range) >= 0.25:
                     return "SKIP"
 
-        # 2. 下半身クリア
         if not (ma5_t < close) or close <= open_p: return "SKIP" 
         stats["stage2_kahanshin"] += 1
         
-        # 3. 溜めクリア
         if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
         stats["stage3_tame"] += 1
 
-        # 4. 60日線クリア
         if ma60_t <= yest['MA60']: return "SKIP" 
         stats["stage4_ma60"] += 1
-        # 一時保存（上書き対応用の辞書構造）
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "ma60_up", "ppp_label": ppp_label}
 
-        # 5. 長トレンドクリア
         if ma100_t <= yest['MA100']: return "SKIP"
         stats["stage5_trend"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "trend_align", "ppp_label": ppp_label}
 
-        # 6. 上ヒゲクリア
         if (high - close) >= ((close - open_p) * 1.5): return "SKIP"
         stats["stage6_upper"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "upper_shadow", "ppp_label": ppp_label}
         
-        # 7. 天井圏回避クリア
         if close >= (df['High'].iloc[-100:].max() * 0.97): return "SKIP"
         stats["stage7_ceiling"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "ceiling_avoid", "ppp_label": ppp_label}
 
-        # 8. 新高値更新（規定の最終合格ステージ）
         if close < df['High'].iloc[-6:-1].max(): return "SKIP"
         stats["stage8_new_high"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "new_high_pass", "ppp_label": ppp_label}
 
-        # 最終規定合格（ステージ8完全突破）をシート2用に保存
         selected_stocks[symbol] = {
             "price": int(close), 
             "ppp_label": ppp_label
@@ -359,7 +370,7 @@ def main():
         record_to_spreadsheet() # シート1 (最終判定のみ1行)
         record_to_sheet2()      # シート2 (8のみ記載)
         
-        # 🌟【修正】メール配信用詳細テキストも最終留まりステージごとに綺麗に仕分け
+        # メール配信用詳細テキストも最終留まりステージごとに綺麗に仕分け
         stages_output = {"ma60_up": [], "trend_align": [], "upper_shadow": [], "ceiling_avoid": [], "new_high_pass": []}
         for code, row_data in sheet1_final_log.items():
             k = row_data["stage_key"]
