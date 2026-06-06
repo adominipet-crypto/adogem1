@@ -12,7 +12,7 @@ from gspread.exceptions import APIError
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
-# 全てが連番・ステップ式の合格カウンタ（ステージ9・10を末尾に拡張）
+# 全てが連番・ステップ式の合格カウンタ
 stats = {
     "stage0_fetched": 0,      # 0. 全データ取得成功
     "stage0.5_higher_ma": 0,  # 0.5 上位足(月足)トレンドクリア
@@ -24,8 +24,8 @@ stats = {
     "stage6_upper": 0,        # 6. 上ヒゲクリア
     "stage7_ceiling": 0,      # 7. 天井圏回避クリア
     "stage8_new_high": 0,     # 8. 新高値更新(規定合格)
-    "stage9_weekly_ma": 0,    # 9. 【追加】週足トレンド(26週線超え)クリア
-    "stage10_monthly_high": 0,# 10.【追加】長期天井圏維持(2年最高値から-20%以内)クリア
+    "stage9_weekly_ma": 0,    # 9. 週足トレンドクリア
+    "stage10_monthly_high": 0,# 10.天井圏維持(完全合格)
     "★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0
 }
 
@@ -90,7 +90,7 @@ def send_error_email(error_message, start_range, end_range):
 
 def get_stock_data_fallback(symbol):
     """ 【自立型・照合検証プロセス】
-        取得データの最終日付が本日(実行日)の東証データと完全一致しているか、
+        取得データの最終日付チェックを「土日・祝日・時差」に影響されない柔軟な形に修正。
         データに不自然な暫定値（PTSノイズ等）が含まれていないかを二重に照合・補正します。
     """
     try:
@@ -115,11 +115,13 @@ def get_stock_data_fallback(symbol):
         
         if df.empty or len(df) < 100: return None
         
-        # ──【照合チェック1: 日付の厳格一致】──
-        last_data_date_str = df.index[-1].strftime("%Y-%m-%d")
-        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        # ──【照合チェック1: 修正（土日や時差でのエラーを防止）】──
+        # 最も新しい株価データの確定日付を取得
+        last_data_date = df.index[-1].date()
+        today = datetime.date.today()
         
-        if last_data_date_str != today_str:
+        # もしデータの最新日が「今日よりも未来」という異常データ、または古すぎるデータ（1週間以上前）なら排除
+        if last_data_date > today or (today - last_data_date).days > 7:
             return None
             
         # ──【照合チェック2: PTS等の暫定ノイズ排除】──
@@ -133,7 +135,6 @@ def get_stock_data_fallback(symbol):
         return None
 
 def record_to_spreadsheet():
-    """ 🌟 シート1へ記録：最高到達ステージ名を割り当てて記録 """
     try:
         sheet = connect_spreadsheet("シート1")
         new_rows = []
@@ -165,7 +166,6 @@ def record_to_spreadsheet():
         raise e
 
 def record_to_sheet2():
-    """ 🌟 シート2へ記録：条件8以降（9、10すべて）を完全クリアした銘柄を追記 """
     if not selected_stocks:
         print("【シート2記録】本日すべての規定条件を満たした銘柄がないため、書き込みをスキップします。")
         return
@@ -208,7 +208,7 @@ def record_to_sheet2():
             cell_updates.append(gspread.Cell(r, 20, "判定(対選定)"))       
             cell_updates.append(gspread.Cell(r, 21, "比率(%)"))            
 
-            # --- 2行目（中段）通過条件を「8. 新高値更新以降クリア」として表記 ---
+            # --- 2行目（中段） ---
             cell_updates.append(gspread.Cell(r + 1, 1, "通過条件ステージ")) 
             cell_updates.append(gspread.Cell(r + 1, 2, "8. 新高値更新以降"))    
             cell_updates.append(gspread.Cell(r + 1, 4, ""))                 
@@ -242,7 +242,6 @@ def record_to_sheet2():
         raise e
 
 def update_yesterday_results():
-    """ 翌営業日の答え合わせロジック（厳格照合フィルタ付き） """
     try:
         sheet = connect_spreadsheet("シート1")
         all_records = sheet.get_all_values()
@@ -279,7 +278,6 @@ def update_yesterday_results():
         raise e
 
 def analyze_stock(symbol):
-    """ 各銘柄のテクニカル分析およびステップ式ステージ絞り込み """
     try:
         df = get_stock_data_fallback(symbol)
         if df is None: return "SKIP"
@@ -297,7 +295,6 @@ def analyze_stock(symbol):
         if df['Volume'].iloc[-1] < 50000: return "SKIP"
         stats["stage1_volume"] += 1
 
-        # 実際のデータ確定日付（文字列）を取得
         data_date = df.index[-1].strftime("%Y-%m-%d")
 
         df['MA5'] = df['Close'].rolling(5).mean()
@@ -351,28 +348,24 @@ def analyze_stock(symbol):
         stats["stage8_new_high"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "new_high_pass", "ppp_label": ppp_label, "date": data_date}
 
-        # ───【🌟ステージ9：週足トレンドフィルター (追加)】───
+        # ───【ステージ9：週足トレンドフィルター】───
         weekly_close = df['Close'].resample('W').last()
         if len(weekly_close) >= 26:
             weekly_ma26 = weekly_close.rolling(26).mean()
-            # 週足終値が26週移動平均線を割り込んでいる（下落トレンド、天井割れ）なら除外
             if weekly_close.iloc[-1] < weekly_ma26.iloc[-1]:
                 return "SKIP"
         stats["stage9_weekly_ma"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "weekly_ma_pass", "ppp_label": ppp_label, "date": data_date}
 
-        # ───【🌟ステージ10：天井圏維持フィルター（2年最高値から-20%以内） (追加)】───
-        # 過去24ヶ月（2年間）の月足最高値を算出
+        # ───【ステージ10：天井圏維持フィルター（2年最高値から-20%以内）】───
         if len(monthly_close) >= 1:
             max_period = min(len(monthly_close), 24)
             monthly_high_24m = df['High'].resample('ME').max().iloc[-max_period:].max()
-            # 2年最高値から20%以上下に沈んでいる（天井圏を完全に割り込んで崩れている）場合は除外
             if close < (monthly_high_24m * 0.80):
                 return "SKIP"
         stats["stage10_monthly_high"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "monthly_high_pass", "ppp_label": ppp_label, "date": data_date}
 
-        # 🌟 条件8、9、10をすべて完全クリアした合格銘柄のみをシート2用辞書に格納
         selected_stocks[symbol] = {
             "price": int(close), 
             "ppp_label": ppp_label,
@@ -400,11 +393,9 @@ def main():
         for symbol in symbols:
             analyze_stock(symbol)
         
-        # スプレッドシートへの永続化
-        record_to_spreadsheet() # シート1 
-        record_to_sheet2()      # シート2 (条件8〜10を完全クリアした銘柄を掲載)
+        record_to_spreadsheet() 
+        record_to_sheet2()      
         
-        # メール配信用詳細テキスト
         stages_output = {
             "ma60_up": [], "trend_align": [], "upper_shadow": [], 
             "ceiling_avoid": [], "new_high_pass": [], "weekly_ma_pass": [], "monthly_high_pass": []
@@ -415,7 +406,6 @@ def main():
             item_str = f"  ■ {code} | {row_data['price']}円" if not ppp else f"  {ppp}■ {code} | {row_data['price']}円"
             stages_output[k].append(item_str)
 
-        # メール本文の組み立て
         body = f"総対象: {len(symbols)}件\n\n" \
                f"【各ステージで留まった(合格)件数】\n" \
                f"0. 全データ取得成功: {stats['stage0_fetched']}件\n" \
