@@ -29,9 +29,7 @@ stats = {
     "★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0
 }
 
-# 重複を排除し、1銘柄につき最終判定のみを保持する辞書
 sheet1_final_log = {}
-# 条件8以降（9、10を含む）をすべて完全クリアした最終規定合格銘柄のみを保持する辞書（シート2用）
 selected_stocks = {}
 
 def connect_spreadsheet(sheet_name="シート1"):
@@ -44,17 +42,17 @@ def connect_spreadsheet(sheet_name="シート1"):
         creds = Credentials.from_service_account_file("google_credentials.json", scopes=scopes)
     
     max_retries = 5
-    backoff_factor = 3  
+    backoff_factor = 5  # 待機時間を少し長めに確保して安定化
     
     for attempt in range(1, max_retries + 1):
         try:
             client = gspread.authorize(creds)
             return client.open("26.5.23_adoGEM_検証ログ").worksheet(sheet_name)
         except APIError as e:
-            if e.response.status_code in [500, 502, 503, 504, 429] and attempt < max_retries:
+            if e.response.status_code in [429, 500, 502, 503, 504] and attempt < max_retries:
                 sleep_time = attempt * backoff_factor
-                print(f"【⚠️Google APIエラー {e.response.status_code}】サーバーが一時的に不安定です。")
-                print(f"  --> {sleep_time}秒後に自動再試行します（試行 {attempt}/{max_retries}）")
+                print(f"【⚠️Google API制限検知 {e.response.status_code}】")
+                print(f"  --> {sleep_time}秒待機して再試行します（試行 {attempt}/{max_retries}）")
                 time.sleep(sleep_time)
             else:
                 raise e  
@@ -84,15 +82,10 @@ def send_error_email(error_message, start_range, end_range):
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
         server.quit()
-        print("【システム】エラーメールを送信しました。")
     except Exception as e:
         print(f"エラーメール送信失敗: {e}")
 
 def get_stock_data_fallback(symbol):
-    """ 【自立型・照合検証プロセス】
-        取得データの最終日付チェックを「土日・祝日・時差」に影響されない柔軟な形に修正。
-        データに不自然な暫定値（PTSノイズ等）が含まれていないかを二重に照合・補正します。
-    """
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.T?range=2y&interval=1d"
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -115,16 +108,12 @@ def get_stock_data_fallback(symbol):
         
         if df.empty or len(df) < 100: return None
         
-        # ──【照合チェック1: 修正（土日や時差でのエラーを防止）】──
-        # 最も新しい株価データの確定日付を取得
         last_data_date = df.index[-1].date()
         today = datetime.date.today()
         
-        # もしデータの最新日が「今日よりも未来」という異常データ、または古すぎるデータ（1週間以上前）なら排除
         if last_data_date > today or (today - last_data_date).days > 7:
             return None
             
-        # ──【照合チェック2: PTS等の暫定ノイズ排除】──
         last_row = df.iloc[-1]
         prev_row = df.iloc[-2]
         if last_row['Close'] == prev_row['Close'] and last_row['High'] == prev_row['High'] and last_row['Volume'] < 100:
@@ -159,8 +148,10 @@ def record_to_spreadsheet():
             
         if new_rows:
             new_rows.sort(key=lambda x: x[1])
+            # 書き込み制限対策として小分けに追記、または完了後少し待機
             sheet.append_rows(new_rows, value_input_option='RAW')
             print(f"【シート1記録】個別ログを計 {len(new_rows)} 件追記しました。")
+            time.sleep(3)
     except Exception as e:
         print(f"シート1記録エラー: {e}")
         raise e
@@ -174,14 +165,13 @@ def record_to_sheet2():
         sheet2 = connect_spreadsheet("シート2")
         row_height = 4 
         
-        cells_a = sheet2.findall(pd.compile(r'.+'), in_column=1)
-        if cells_a:
-            last_filled_row = max(cell.row for cell in cells_a)
-            start_row = ((last_filled_row // row_height) * row_height) + 1
-            if start_row <= last_filled_row:
-                start_row += row_height
-        else:
-            start_row = 1
+        # findallの負荷を下げるため、A列のデータを全取得して配列長から最終行を推測
+        col1_values = sheet2.col_values(1)
+        last_filled_row = len(col1_values)
+        
+        start_row = ((last_filled_row // row_height) * row_height) + 1
+        if start_row <= last_filled_row:
+            start_row += row_height
 
         cell_updates = []
         sorted_codes = sorted(selected_stocks.keys())
@@ -194,48 +184,44 @@ def record_to_sheet2():
             ppp_status = data["ppp_label"].strip() if data["ppp_label"].strip() else "通常"
             data_date = data["date"]  
             
-            # --- 1行目（上段） ---
+            # --- 1行目 ---
             cell_updates.append(gspread.Cell(r, 1, data_date))              
             cell_updates.append(gspread.Cell(r, 2, code))                 
             cell_updates.append(gspread.Cell(r, 3, price))                
             cell_updates.append(gspread.Cell(r, 4, ""))                   
             cell_updates.append(gspread.Cell(r, 5, "翌日終値"))           
-            
             for day in range(3, 16):
                 cell_updates.append(gspread.Cell(r, 3 + day, f"{day}営業日"))
-                
             cell_updates.append(gspread.Cell(r, 19, "差額(対選定)"))       
             cell_updates.append(gspread.Cell(r, 20, "判定(対選定)"))       
             cell_updates.append(gspread.Cell(r, 21, "比率(%)"))            
 
-            # --- 2行目（中段） ---
+            # --- 2行目 ---
             cell_updates.append(gspread.Cell(r + 1, 1, "通過条件ステージ")) 
             cell_updates.append(gspread.Cell(r + 1, 2, "8. 新高値更新以降"))    
             cell_updates.append(gspread.Cell(r + 1, 4, ""))                 
             cell_updates.append(gspread.Cell(r + 1, 5, "判定待ち"))         
-
             for day in range(3, 16):
                 cell_updates.append(gspread.Cell(r + 1, 3 + day, "判定"))
-
             cell_updates.append(gspread.Cell(r + 1, 19, "差額枠"))
             cell_updates.append(gspread.Cell(r + 1, 20, "判定枠"))
             cell_updates.append(gspread.Cell(r + 1, 21, "比率枠"))
 
-            # --- 3行目（下段） ---
+            # --- 3行目 ---
             cell_updates.append(gspread.Cell(r + 2, 1, "PPP"))              
             cell_updates.append(gspread.Cell(r + 2, 2, ppp_status))         
             cell_updates.append(gspread.Cell(r + 2, 5, "前日比(%)"))        
-            
             for day in range(3, 16):
                 cell_updates.append(gspread.Cell(r + 2, 3 + day, "前日比(%)"))
 
-            # --- 4行目（空白セパレーター） ---
+            # --- 4行目 ---
             cell_updates.append(gspread.Cell(r + 3, 1, ""))
             cell_updates.append(gspread.Cell(r + 3, 2, ""))
 
         if cell_updates:
             sheet2.update_cells(cell_updates, value_input_option='RAW')
             print(f"【シート2記録】完全規定合格 {len(sorted_codes)} 件をシート2に追記しました。")
+            time.sleep(3)
             
     except Exception as e:
         print(f"シート2記録エラー: {e}")
@@ -269,10 +255,15 @@ def update_yesterday_results():
                 cell_list.append(gspread.Cell(i + 1, 7, mark))
                 cell_list.append(gspread.Cell(i + 1, 8, f"{pct:+.2f}%"))
                 print(f"【答え合わせ完了】シート1 {code}: {mark} ({pct:+.2f}%)")
+                
+                # 大量の株価データ連続取得によるYahoo/Googleへの負荷を分散させるウェイト
+                time.sleep(0.5)
         
         if cell_list:
+            # 1回のupdate_cellsリクエストでまとめて送信し、直後に安全のため待機
             sheet.update_cells(cell_list)
             print(f"【システム】シート1の合計 {len(cell_list)//3} 件を一括更新しました。")
+            time.sleep(5)
     except Exception as e:
         print(f"自動答え合わせエラー: {e}")
         raise e
