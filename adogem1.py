@@ -12,24 +12,26 @@ from gspread.exceptions import APIError
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
-# 全てが連番・ステップ式の合格カウンタ
+# 全てが連番・ステップ式の合格カウンタ（1〜12番、カッコなし名称に統一）
 stats = {
-    "stage0_fetched": 0,      # 0. 全データ取得成功
-    "stage0.5_higher_ma": 0,  # 0.5 上位足(月足)トレンドクリア
-    "stage1_volume": 0,       # 1. 出来高クリア
-    "stage2_kahanshin": 0,    # 2. 下半身クリア
-    "stage3_tame": 0,         # 3. 溜めクリア
-    "stage4_ma60": 0,         # 4. 60日線クリア
-    "stage5_trend": 0,        # 5. 長トレンドクリア
-    "stage6_upper": 0,        # 6. 上ヒゲクリア
-    "stage7_ceiling": 0,      # 7. 天井圏回避クリア
-    "stage8_new_high": 0,     # 8. 新高値更新(規定合格)
-    "stage9_weekly_ma": 0,    # 9. 週足トレンドクリア
-    "stage10_monthly_high": 0,# 10.天井圏維持(完全合格)
+    "stage1_fetched": 0,       # 1. 全データ取得成功
+    "stage2_monthly_60ma": 0,  # 2. 月足MA60クリア
+    "stage3_volume": 0,        # 3. 出来高5万株クリア
+    "stage4_kahanshin": 0,     # 4. 下半身クリア
+    "stage5_tame": 0,          # 5. 溜めクリア
+    "stage6_ma60_up": 0,       # 6. 右肩上がり
+    "stage7_trend_up": 0,      # 7. 長トレンド
+    "stage8_upper_shadow": 0,  # 8. 上ヒゲクリア
+    "stage9_ceiling_avoid": 0, # 9. 天井圏回避
+    "stage10_new_high": 0,     # 10. 新高値更新
+    "stage11_weekly_60ma": 0,  # 11. 週足60クリア
+    "stage12_monthly_ma24": 0, # 12. 天井圏維持
     "★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0
 }
 
+# 重複を排除し、1銘柄につき最終判定のみを保持する辞書
 sheet1_final_log = {}
+# ステージ12を完全クリアした最終規定合格銘柄のみを保持する辞書（シート2用）
 selected_stocks = {}
 
 def connect_spreadsheet(sheet_name="シート1"):
@@ -42,7 +44,7 @@ def connect_spreadsheet(sheet_name="シート1"):
         creds = Credentials.from_service_account_file("google_credentials.json", scopes=scopes)
     
     max_retries = 5
-    backoff_factor = 5  # 待機時間を少し長めに確保して安定化
+    backoff_factor = 5  
     
     for attempt in range(1, max_retries + 1):
         try:
@@ -87,7 +89,7 @@ def send_error_email(error_message, start_range, end_range):
 
 def get_stock_data_fallback(symbol):
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.T?range=2y&interval=1d"
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.T?range=5y&interval=1d" 
         headers = {"User-Agent": "Mozilla/5.0"}
         res = requests.get(url, headers=headers, timeout=15)
         if res.status_code != 200: return None
@@ -129,43 +131,46 @@ def record_to_spreadsheet():
         new_rows = []
         
         for code, row_data in sheet1_final_log.items():
-            price = row_data["price"]
             stage_key = row_data["stage_key"]
+            
+            # 【条件】シート1は 7. 長トレンド以上（7〜12）のみを書き出し対象にする
+            if stage_key == "ma60_up":
+                continue
+
+            price = row_data["price"]
             ppp_status = row_data["ppp_label"].strip() if row_data["ppp_label"].strip() else "通常"
             data_date = row_data["date"]  
             
             stage_names = {
-                "ma60_up": "4. 60日線右肩上がり", 
-                "trend_align": "5. 長期トレンド同期",
-                "upper_shadow": "6. 上ヒゲ選別", 
-                "ceiling_avoid": "7. 天井圏回避(最終)",
-                "new_high_pass": "8. 新高値更新(規定合格)",
-                "weekly_ma_pass": "9. 週足トレンド合格",
-                "monthly_high_pass": "10. 天井圏維持(完全合格)"
+                "trend_align": "7. 長トレンド",
+                "upper_shadow": "8. 上ヒゲクリア", 
+                "ceiling_avoid": "9. 天井圏回避",
+                "new_high_pass": "10. 新高値更新",
+                "weekly_ma_pass": "11. 週足60クリア",
+                "monthly_high_pass": "12. 天井圏維持"
             }
             stage_name = stage_names.get(stage_key, stage_key)
             new_rows.append([data_date, code, stage_name, ppp_status, price, "", "判定待ち", ""])
             
         if new_rows:
             new_rows.sort(key=lambda x: x[1])
-            # 書き込み制限対策として小分けに追記、または完了後少し待機
             sheet.append_rows(new_rows, value_input_option='RAW')
-            print(f"【シート1記録】個別ログを計 {len(new_rows)} 件追記しました。")
+            print(f"【シート1記録】7.長トレンド以上の個別ログを計 {len(new_rows)} 件追記しました。")
             time.sleep(3)
     except Exception as e:
         print(f"シート1記録エラー: {e}")
         raise e
 
 def record_to_sheet2():
+    # 【条件】シート2は 12. 天井圏維持（完全クリア）のみを書き出す
     if not selected_stocks:
-        print("【シート2記録】本日すべての規定条件を満たした銘柄がないため、書き込みをスキップします。")
+        print("【シート2記録】本日ステージ12を完全クリアした銘柄がないため、書き込みをスキップします。")
         return
 
     try:
         sheet2 = connect_spreadsheet("シート2")
         row_height = 4 
         
-        # findallの負荷を下げるため、A列のデータを全取得して配列長から最終行を推測
         col1_values = sheet2.col_values(1)
         last_filled_row = len(col1_values)
         
@@ -184,7 +189,7 @@ def record_to_sheet2():
             ppp_status = data["ppp_label"].strip() if data["ppp_label"].strip() else "通常"
             data_date = data["date"]  
             
-            # --- 1行目 ---
+            # --- 1行目 (翌日終値、3営業日〜15営業日まで対応) ---
             cell_updates.append(gspread.Cell(r, 1, data_date))              
             cell_updates.append(gspread.Cell(r, 2, code))                 
             cell_updates.append(gspread.Cell(r, 3, price))                
@@ -198,7 +203,7 @@ def record_to_sheet2():
 
             # --- 2行目 ---
             cell_updates.append(gspread.Cell(r + 1, 1, "通過条件ステージ")) 
-            cell_updates.append(gspread.Cell(r + 1, 2, "8. 新高値更新以降"))    
+            cell_updates.append(gspread.Cell(r + 1, 2, "12. 天井圏維持"))    
             cell_updates.append(gspread.Cell(r + 1, 4, ""))                 
             cell_updates.append(gspread.Cell(r + 1, 5, "判定待ち"))         
             for day in range(3, 16):
@@ -220,7 +225,7 @@ def record_to_sheet2():
 
         if cell_updates:
             sheet2.update_cells(cell_updates, value_input_option='RAW')
-            print(f"【シート2記録】完全規定合格 {len(sorted_codes)} 件をシート2に追記しました。")
+            print(f"【シート2記録】完全規定合格(ステージ12) {len(sorted_codes)} 件をシート2に追記しました。")
             time.sleep(3)
             
     except Exception as e:
@@ -256,11 +261,9 @@ def update_yesterday_results():
                 cell_list.append(gspread.Cell(i + 1, 8, f"{pct:+.2f}%"))
                 print(f"【答え合わせ完了】シート1 {code}: {mark} ({pct:+.2f}%)")
                 
-                # 大量の株価データ連続取得によるYahoo/Googleへの負荷を分散させるウェイト
                 time.sleep(0.5)
         
         if cell_list:
-            # 1回のupdate_cellsリクエストでまとめて送信し、直後に安全のため待機
             sheet.update_cells(cell_list)
             print(f"【システム】シート1の合計 {len(cell_list)//3} 件を一括更新しました。")
             time.sleep(5)
@@ -273,18 +276,19 @@ def analyze_stock(symbol):
         df = get_stock_data_fallback(symbol)
         if df is None: return "SKIP"
         
-        stats["stage0_fetched"] += 1
+        stats["stage1_fetched"] += 1
 
-        # ───【ステージ0.5 上位足(月足)トレンドフィルター】───
+        # ───【2. 月足MA60クリア】───
         monthly_close = df['Close'].resample('ME').last()
-        if len(monthly_close) >= 12:
-            monthly_ma12 = monthly_close.rolling(12).mean()
-            if monthly_close.iloc[-1] < monthly_ma12.iloc[-1]:
+        if len(monthly_close) >= 60:
+            monthly_ma60 = monthly_close.rolling(60).mean()
+            if monthly_close.iloc[-1] < monthly_ma60.iloc[-1]:
                 return "SKIP"
-        stats["stage0.5_higher_ma"] += 1
+        stats["stage2_monthly_60ma"] += 1
 
+        # ───【3. 出来高5万株クリア】───
         if df['Volume'].iloc[-1] < 50000: return "SKIP"
-        stats["stage1_volume"] += 1
+        stats["stage3_volume"] += 1
 
         data_date = df.index[-1].strftime("%Y-%m-%d")
 
@@ -313,50 +317,57 @@ def analyze_stock(symbol):
                 if ((high - high_box) / day_range) >= 0.25 and ((low_box - low) / day_range) >= 0.25:
                     return "SKIP"
 
+        # ───【4. 下半身クリア】───
         if not (ma5_t < close) or close <= open_p: return "SKIP" 
-        stats["stage2_kahanshin"] += 1
+        stats["stage4_kahanshin"] += 1
         
-        if not (yest['Close'] < yest['MA5'] and yest2['Close'] < yest2['MA5']): return "SKIP"
-        stats["stage3_tame"] += 1
+        # ───【5. 溜めクリア】───
+        if yest['Close'] >= yest['MA5'] or yest2['Close'] >= yest2['MA5']: return "SKIP"
+        stats["stage5_tame"] += 1
 
+        # ───【6. 右肩上がり】───
         if ma60_t <= yest['MA60']: return "SKIP" 
-        stats["stage4_ma60"] += 1
+        stats["stage6_ma60_up"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "ma60_up", "ppp_label": ppp_label, "date": data_date}
 
+        # ───【7. 長トレンド】───
         if ma100_t <= yest['MA100']: return "SKIP"
-        stats["stage5_trend"] += 1
+        stats["stage7_trend_up"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
 
+        # ───【8. 上ヒゲクリア】───
         if (high - close) >= ((close - open_p) * 1.5): return "SKIP"
-        stats["stage6_upper"] += 1
+        stats["stage8_upper_shadow"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "upper_shadow", "ppp_label": ppp_label, "date": data_date}
         
-        if close >= (df['High'].iloc[-100:].max() * 0.97): return "SKIP"
-        stats["stage7_ceiling"] += 1
+        # ───【9. 天井圏回避】───
+        if ma100_t <= close <= (ma100_t * 1.03): return "SKIP"
+        stats["stage9_ceiling_avoid"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "ceiling_avoid", "ppp_label": ppp_label, "date": data_date}
 
-        if close < df['High'].iloc[-6:-1].max(): return "SKIP"
-        stats["stage8_new_high"] += 1
+        # ───【10. 新高値更新】───
+        if close <= ma5_t: return "SKIP"
+        stats["stage10_new_high"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "new_high_pass", "ppp_label": ppp_label, "date": data_date}
 
-        # ───【ステージ9：週足トレンドフィルター】───
+        # ───【11：週足60クリア】───
         weekly_close = df['Close'].resample('W').last()
-        if len(weekly_close) >= 26:
-            weekly_ma26 = weekly_close.rolling(26).mean()
-            if weekly_close.iloc[-1] < weekly_ma26.iloc[-1]:
+        if len(weekly_close) >= 60:
+            weekly_ma60 = weekly_close.rolling(60).mean()
+            if weekly_close.iloc[-1] < weekly_ma60.iloc[-1]:
                 return "SKIP"
-        stats["stage9_weekly_ma"] += 1
+        stats["stage11_weekly_60ma"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "weekly_ma_pass", "ppp_label": ppp_label, "date": data_date}
 
-        # ───【ステージ10：天井圏維持フィルター（2年最高値から-20%以内）】───
-        if len(monthly_close) >= 1:
-            max_period = min(len(monthly_close), 24)
-            monthly_high_24m = df['High'].resample('ME').max().iloc[-max_period:].max()
-            if close < (monthly_high_24m * 0.80):
+        # ───【12：天井圏維持】───
+        if len(monthly_close) >= 24:
+            monthly_ma24 = monthly_close.rolling(24).mean()
+            if close < (monthly_ma24.iloc[-1] * 0.80):
                 return "SKIP"
-        stats["stage10_monthly_high"] += 1
+        stats["stage12_monthly_ma24"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "monthly_high_pass", "ppp_label": ppp_label, "date": data_date}
 
+        # ステージ12を完全にクリアしたものを登録
         selected_stocks[symbol] = {
             "price": int(close), 
             "ppp_label": ppp_label,
@@ -388,39 +399,60 @@ def main():
         record_to_sheet2()      
         
         stages_output = {
-            "ma60_up": [], "trend_align": [], "upper_shadow": [], 
-            "ceiling_avoid": [], "new_high_pass": [], "weekly_ma_pass": [], "monthly_high_pass": []
+            "trend_align": [], "upper_shadow": [], "ceiling_avoid": [], 
+            "new_high_pass": [], "weekly_ma_pass": [], "monthly_high_pass": []
         }
         for code, row_data in sheet1_final_log.items():
             k = row_data["stage_key"]
+            if k not in stages_output: continue # 6.右肩上がり(ma60_up)以下は出力用に収集しない
             ppp = row_data["ppp_label"]
             item_str = f"  ■ {code} | {row_data['price']}円" if not ppp else f"  {ppp}■ {code} | {row_data['price']}円"
             stages_output[k].append(item_str)
 
         body = f"総対象: {len(symbols)}件\n\n" \
                f"【各ステージで留まった(合格)件数】\n" \
-               f"0. 全データ取得成功: {stats['stage0_fetched']}件\n" \
-               f"0.5 上位足トレンドクリア: {stats['stage0.5_higher_ma']}件\n" \
-               f"1. 出来高クリア: {stats['stage1_volume']}件\n" \
-               f"2. 下半身クリア: {stats['stage2_kahanshin']}件\n" \
-               f"3. 溜めクリア: {stats['stage3_tame']}件\n" \
-               f"4. 60日線クリア: {stats['stage4_ma60']}件\n" \
-               f"5. 長トレンドクリア: {stats['stage5_trend']}件\n" \
-               f"6. 上ヒゲクリア: {stats['stage6_upper']}件\n" \
-               f"7. 天井圏回避クリア: {stats['stage7_ceiling']}件\n" \
-               f"8. 新高値更新(規定合格): {stats['stage8_new_high']}件\n" \
-               f"9. 週足トレンドクリア: {stats['stage9_weekly_ma']}件\n" \
-               f"10.天井圏維持(完全合格): {stats['stage10_monthly_high']}件\n\n" \
+               f"1. 全データ取得成功: {stats['stage1_fetched']}件\n" \
+               f"2. 月足MA60クリア: {stats['stage2_monthly_60ma']}件\n" \
+               f"3. 出来高5万株クリア: {stats['stage3_volume']}件\n" \
+               f"4. 下半身クリア: {stats['stage4_kahanshin']}件\n" \
+               f"5. 溜めクリア: {stats['stage5_tame']}件\n" \
+               f"6. 右肩上がり: {stats['stage6_ma60_up']}件\n" \
+               f"7. 長トレンド: {stats['stage7_trend_up']}件\n" \
+               f"8. 上ヒゲクリア: {stats['stage8_upper_shadow']}件\n" \
+               f"9. 天井圏回避: {stats['stage9_ceiling_avoid']}件\n" \
+               f"10. 新高値更新: {stats['stage10_new_high']}件\n" \
+               f"11. 週足60クリア: {stats['stage11_weekly_60ma']}件\n" \
+               f"12. 天井圏維持: {stats['stage12_monthly_ma24']}件\n\n" \
                f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
-               f"【詳細（各銘柄の最終判定ステージ）】\n" \
-               f"8.新高値更新で留まった銘柄:\n" + "\n".join(stages_output["new_high_pass"]) + "\n\n" \
-               f"9.週足トレンドクリアで留まった銘柄:\n" + "\n".join(stages_output["weekly_ma_pass"]) + "\n\n" \
-               f"10.天井圏維持(完全確定合格)の銘柄:\n" + "\n".join(stages_output["monthly_high_pass"])
+               f"【詳細（各銘柄の最終判定ステージ）】\n"
+               
+        # 【条件】メール個別表示（詳細欄）も 7.長トレンド以降（7〜12）すべてを一覧書き出し
+        body += f"7. 長トレンドで留まった銘柄:\n" + "\n".join(stages_output["trend_align"]) + "\n\n" \
+                f"8. 上ヒゲクリアで留まった銘柄:\n" + "\n".join(stages_output["upper_shadow"]) + "\n\n" \
+                f"9. 天井圏回避で留まった銘柄:\n" + "\n".join(stages_output["ceiling_avoid"]) + "\n\n" \
+                f"10. 新高値更新で留まった銘柄:\n" + "\n".join(stages_output["new_high_pass"]) + "\n\n" \
+                f"11. 週足60クリアで留まった銘柄:\n" + "\n".join(stages_output["weekly_ma_pass"]) + "\n\n" \
+                f"12. 天井圏維持(完全合格)の銘柄:\n" + "\n".join(stages_output["monthly_high_pass"]) + "\n\n" \
+                f"--------------------------------------------------\n" \
+                f"【条件一覧】\n" \
+                f"1. 全データ取得成功\n" \
+                f"2. 月足MA60クリア\n" \
+                f"3. 出来高5万株クリア\n" \
+                f"4. 下半身クリア\n" \
+                f"5. 溜めMA5クリア（MA5以上削除）\n" \
+                f"6. 右肩上がり（MA60以下削除）\n" \
+                f"7. 長期トレンド（MA100が前日より上昇）\n" \
+                f"8. 上ヒゲクリア（上ヒゲが実態の1.5以上削除）\n" \
+                f"9. 天井圏MA100回避（MA100の3％以内削除）\n" \
+                f"10. 新高値MA5更新\n" \
+                f"11. 週足MA60クリア\n" \
+                f"12. 天井圏維持（月足MA24の20%以上削除）\n" \
+                f"--------------------------------------------------"
 
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
         msg['To'] = SENDER_EMAIL
-        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 完全合格:{stats['stage10_monthly_high']}件"
+        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 完全合格:{stats['stage12_monthly_ma24']}件"
         msg.attach(MIMEText(body, 'plain'))
         
         server = smtplib.SMTP("smtp.gmail.com", 587)
