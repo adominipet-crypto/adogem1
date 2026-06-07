@@ -385,4 +385,100 @@ def analyze_stock(symbol):
 
         if "★PPP " in ppp_label: stats["★PPP"] += 1
         elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
-        else: stats["normal_detect"] +=
+        else: stats["normal_detect"] += 1
+        return f"{ppp_label}{stock_text}"
+    except:
+        return "ERROR"
+
+def get_target_symbols(start, end):
+    return [str(i) for i in range(start, end)]
+
+def main():
+    start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
+    try:
+        if start_range == 1300:
+            update_yesterday_results()
+            time.sleep(2)
+            
+        symbols = get_target_symbols(start_range, end_range)
+        for symbol in symbols:
+            analyze_stock(symbol)
+        
+        record_to_spreadsheet() 
+        record_to_sheet2()      
+        
+        stages_output = {
+            "trend_align": [], "upper_shadow": [], "ceiling_avoid": [], 
+            "new_high_pass": [], "weekly_ma_pass": [], "monthly_high_pass": []
+        }
+        for code, row_data in sheet1_final_log.items():
+            k = row_data["stage_key"]
+            if k not in stages_output: continue 
+            ppp = row_data["ppp_label"]
+            item_str = f"  ■ {code} | {row_data['price']}円" if not ppp else f"  {ppp}■ {code} | {row_data['price']}円"
+            stages_output[k].append(item_str)
+
+        body = f"総対象: {len(symbols)}件\n\n" \
+               f"【各ステージで留まった(合格)件数】\n" \
+               f"1. 全データ取得成功: {stats['stage1_fetched']}件\n" \
+               f"2. 月足MA60クリア: {stats['stage2_monthly_60ma']}件\n" \
+               f"3. 出来高5万株クリア: {stats['stage3_volume']}件\n" \
+               f"4. 下半身クリア: {stats['stage4_kahanshin']}件\n" \
+               f"5. 溜めクリア: {stats['stage5_tame']}件\n" \
+               f"6. 右肩上がり: {stats['stage6_ma60_up']}件\n" \
+               f"7. 長トレンド: {stats['stage7_trend_up']}件\n" \
+               f"8. 上ヒゲクリア: {stats['stage8_upper_shadow']}件\n" \
+               f"9. 天井圏回避: {stats['stage9_ceiling_avoid']}件\n" \
+               f"10. 新高値更新: {stats['stage10_new_high']}件\n" \
+               f"11. 週足60クリア: {stats['stage11_weekly_60ma']}件\n" \
+               f"12. 天井圏維持: {stats['stage12_monthly_ma24']}件\n\n" \
+               f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
+               f"【詳細（各銘柄の最終判定ステージ）】\n"
+               
+        body += f"7. 長トレンドで留まった銘柄:\n" + "\n".join(stages_output["trend_align"]) + "\n\n" \
+                f"8. 上ヒゲクリアで留まった銘柄:\n" + "\n".join(stages_output["upper_shadow"]) + "\n\n" \
+                f"9. 天井圏回避で留まった銘柄:\n" + "\n".join(stages_output["ceiling_avoid"]) + "\n\n" \
+                f"10. 新高値更新で留まった銘柄:\n" + "\n".join(stages_output["new_high_pass"]) + "\n\n" \
+                f"11. 週足60クリアで留まった銘柄:\n" + "\n".join(stages_output["weekly_ma_pass"]) + "\n\n" \
+                f"12. 天井圏維持(完全合格)の銘柄:\n" + "\n".join(stages_output["monthly_high_pass"]) + "\n\n" \
+                f"--------------------------------------------------\n" \
+                f"【条件一覧】\n" \
+                f"1. 全データ取得成功\n" \
+                f"2. 月足MA60クリア\n" \
+                f"3. 出来高5万株クリア\n" \
+                f"4. 下半身クリア\n" \
+                f"5. 溜めMA5クリア（MA5以上削除）\n" \
+                f"6. 右肩上がり（MA60以下削除）\n" \
+                f"7. 長期トレンド（MA100が前日より上昇）\n" \
+                f"8. 上ヒゲクリア（上ヒゲが実態の1.5以上削除）\n" \
+                f"9. 天井圏MA100回避（MA100の3％以内削除）\n" \
+                f"10. 新高値MA5更新\n" \
+                f"11. 週足MA60クリア\n" \
+                f"12. 天井圏維持（月足MA24の20%以上削除）\n" \
+                f"--------------------------------------------------\n" \
+                f"【判定結果マーク基準】翌日終値\n" \
+                f" ◎ ： +2.0%以上\n" \
+                f" ◯ ： +0.1%〜+2.0%\n" \
+                f" ▲ ： -0.1%〜+0.1%\n" \
+                f" ✕ ： -0.1%未満\n" \
+                f"--------------------------------------------------"
+
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = SENDER_EMAIL
+        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 完全合格:{stats['stage12_monthly_ma24']}件"
+        msg.attach(MIMEText(body, 'plain'))
+        
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print("スキャンおよびレポートメール送信完了")
+        
+    except Exception as e:
+        send_error_email(traceback.format_exc(), start_range, end_range)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
