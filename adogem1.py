@@ -190,22 +190,22 @@ def record_to_sheet2():
             data_date = data["date"]  
             
             # --- 1行目 ---
-            cell_updates.append(gspread.Cell(r, 1, data_date))              
-            cell_updates.append(gspread.Cell(r, 2, code))                 
-            cell_updates.append(gspread.Cell(r, 3, price))                
-            cell_updates.append(gspread.Cell(r, 4, ""))                   
-            cell_updates.append(gspread.Cell(r, 5, "翌日終値"))           
+            cell_updates.append(gspread.Cell(r, 1, data_date))
+            cell_updates.append(gspread.Cell(r, 2, code))
+            cell_updates.append(gspread.Cell(r, 3, price))
+            cell_updates.append(gspread.Cell(r, 4, ""))
+            cell_updates.append(gspread.Cell(r, 5, "翌日終値"))
             for day in range(3, 16):
                 cell_updates.append(gspread.Cell(r, 3 + day, f"{day}営業日"))
-            cell_updates.append(gspread.Cell(r, 19, "差額(対選定)"))       
-            cell_updates.append(gspread.Cell(r, 20, "判定(対選定)"))       
-            cell_updates.append(gspread.Cell(r, 21, "比率(%)"))            
+            cell_updates.append(gspread.Cell(r, 19, "差額(対選定)"))
+            cell_updates.append(gspread.Cell(r, 20, "判定(対選定)"))
+            cell_updates.append(gspread.Cell(r, 21, "比率(%)"))
 
             # --- 2行目 ---
-            cell_updates.append(gspread.Cell(r + 1, 1, "通過条件ステージ")) 
-            cell_updates.append(gspread.Cell(r + 1, 2, "12. 天井圏維持"))    
-            cell_updates.append(gspread.Cell(r + 1, 4, ""))                 
-            cell_updates.append(gspread.Cell(r + 1, 5, "判定待ち"))         
+            cell_updates.append(gspread.Cell(r + 1, 1, "通過条件ステージ"))
+            cell_updates.append(gspread.Cell(r + 1, 2, "12. 天井圏維持"))
+            cell_updates.append(gspread.Cell(r + 1, 4, ""))
+            cell_updates.append(gspread.Cell(r + 1, 5, "判定待ち"))
             for day in range(3, 16):
                 cell_updates.append(gspread.Cell(r + 1, 3 + day, "判定"))
             cell_updates.append(gspread.Cell(r + 1, 19, "差額枠"))
@@ -213,9 +213,9 @@ def record_to_sheet2():
             cell_updates.append(gspread.Cell(r + 1, 21, "比率枠"))
 
             # --- 3行目 ---
-            cell_updates.append(gspread.Cell(r + 2, 1, "PPP"))              
-            cell_updates.append(gspread.Cell(r + 2, 2, ppp_status))         
-            cell_updates.append(gspread.Cell(r + 2, 5, "前日比(%)"))        
+            cell_updates.append(gspread.Cell(r + 2, 1, "PPP"))
+            cell_updates.append(gspread.Cell(r + 2, 2, ppp_status))
+            cell_updates.append(gspread.Cell(r + 2, 5, "前日比(%)"))
             for day in range(3, 16):
                 cell_updates.append(gspread.Cell(r + 2, 3 + day, "前日比(%)"))
 
@@ -273,4 +273,39 @@ def update_yesterday_results():
         
         if cell_list:
             sheet.update_cells(cell_list)
-            print(f"【
+            print(f"【システム】シート1の合計 {len(cell_list)//3} 件を一括更新しました。")
+            time.sleep(5)
+    except Exception as e:
+        print(f"自動答え合わせエラー: {e}")
+        raise e
+
+def analyze_stock(symbol):
+    try:
+        df = get_stock_data_fallback(symbol)
+        if df is None: 
+            stats["stage1_fetched"] += 1
+            return "SKIP"
+        
+        # ───【2. 月足MA60クリア】───
+        monthly_close = df['Close'].resample('ME').last()
+        if len(monthly_close) >= 60:
+            monthly_ma60 = monthly_close.rolling(60).mean()
+            if monthly_close.iloc[-1] < monthly_ma60.iloc[-1]:
+                stats["stage2_monthly_60ma"] += 1
+                return "SKIP"
+
+        # ───【3. 出来高5万株クリア】───
+        if df['Volume'].iloc[-1] < 50000: 
+            stats["stage3_volume"] += 1
+            return "SKIP"
+
+        data_date = df.index[-1].strftime("%Y-%m-%d")
+
+        df['MA5'] = df['Close'].rolling(5).mean()
+        df['MA20'] = df['Close'].rolling(20).mean()
+        df['MA60'] = df['Close'].rolling(60).mean()
+        df['MA100'] = df['Close'].rolling(100).mean()
+        df['MA300'] = df['Close'].rolling(300).mean() if len(df) >= 300 else None
+        
+        today, yest, yest2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
+        close, open_p, high, low = today['Close'], today['Open'], today['High'], today
