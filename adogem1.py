@@ -77,4 +77,117 @@ def send_error_email(error_message, start_range, end_range):
            f"{error_message}\n" \
            f"--------------------------------------------------"
     
-    msg.
+    msg.attach(MIMEText(body, 'plain'))
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+    except Exception as e:
+        print(f"エラーメール送信失敗: {e}")
+
+def get_stock_data_fallback(symbol):
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.T?range=5y&interval=1d" 
+        headers = {"User-Agent": "Mozilla/5.0"}
+        res = requests.get(url, headers=headers, timeout=15)
+        if res.status_code != 200: return None
+        result = res.json().get("chart", {}).get("result", [])
+        if not result: return None
+        
+        quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
+        timestamps = result[0].get("timestamp", [])
+        
+        df = pd.DataFrame({
+            "Open": quotes.get("open", []), "High": quotes.get("high", []),
+            "Low": quotes.get("low", []), "Close": quotes.get("close", []), "Volume": quotes.get("volume", [])
+        }, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
+        
+        df.dropna(subset=["Close", "Volume"], inplace=True)
+        df = df[df['Volume'] > 0] 
+        df = df.sort_index()
+        
+        if df.empty or len(df) < 100: return None
+        
+        last_data_date = df.index[-1].date()
+        today = datetime.date.today()
+        
+        if last_data_date > today or (today - last_data_date).days > 7:
+            return None
+            
+        last_row = df.iloc[-1]
+        prev_row = df.iloc[-2]
+        if last_row['Close'] == prev_row['Close'] and last_row['High'] == prev_row['High'] and last_row['Volume'] < 100:
+            df = df.iloc[:-1]
+            
+        return df
+    except:
+        return None
+
+def record_to_spreadsheet():
+    try:
+        sheet = connect_spreadsheet("シート1")
+        new_rows = []
+        
+        for code, row_data in sheet1_final_log.items():
+            stage_key = row_data["stage_key"]
+            
+            # シート1は 7. 長トレンド以上（7〜12）のみを書き出し対象にする
+            if stage_key in ["fetched", "monthly_60ma", "volume", "kahanshin", "tame", "ma60_up"]:
+                continue
+
+            price = row_data["price"]
+            ppp_status = row_data["ppp_label"].strip() if row_data["ppp_label"].strip() else "通常"
+            data_date = row_data["date"]  
+            
+            stage_names = {
+                "trend_align": "7. 長トレンド",
+                "upper_shadow": "8. 上ヒゲクリア", 
+                "ceiling_avoid": "9. 天井圏回避",
+                "new_high_pass": "10. 新高値更新",
+                "weekly_ma_pass": "11. 週足60クリア",
+                "monthly_high_pass": "12. 天井圏維持"
+            }
+            stage_name = stage_names.get(stage_key, stage_key)
+            new_rows.append([data_date, code, stage_name, ppp_status, price, "", "判定待ち", ""])
+            
+        if new_rows:
+            new_rows.sort(key=lambda x: x[1])
+            sheet.append_rows(new_rows, value_input_option='RAW')
+            print(f"【シート1記録】確定ステージが7以上の個別ログを計 {len(new_rows)} 件追記しました。")
+            time.sleep(3)
+    except Exception as e:
+        print(f"シート1記録エラー: {e}")
+        raise e
+
+def record_to_sheet2():
+    # 【条件】シート2には条件12を完全クリアした銘柄（selected_stocks）以外は絶対に乗せない
+    if not selected_stocks:
+        print("【シート2記録】本日ステージ12を完全クリアした銘柄がないため、書き込みをスキップします。")
+        return
+
+    try:
+        sheet2 = connect_spreadsheet("シート2")
+        row_height = 4 
+        
+        col1_values = sheet2.col_values(1)
+        last_filled_row = len(col1_values)
+        
+        start_row = ((last_filled_row // row_height) * row_height) + 1
+        if start_row <= last_filled_row:
+            start_row += row_height
+
+        cell_updates = []
+        sorted_codes = sorted(selected_stocks.keys())
+        
+        for idx, code in enumerate(sorted_codes):
+            r = start_row + (idx * row_height)
+            data = selected_stocks[code]
+            
+            price = data["price"]
+            ppp_status = data["ppp_label"].strip() if data["ppp_label"].strip() else "通常"
+            data_date = data["date"]  
+            
+            # --- 1行目 ---
+            cell_updates.append(gspread.Cell(
