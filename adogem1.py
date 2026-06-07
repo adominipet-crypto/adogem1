@@ -435,27 +435,27 @@ def main():
 
         body = f"総対象: {total_len}件\n\n" \
                f"【各ステージの生存（クリア）件数】\n" \
-               f"1. 全データ取得成功した銘柄: {s1}件\n" \
-               f"2. 月足MA60クリアした銘柄: {s2}件\n" \
-               f"3. 出来高5万株クリアした銘柄: {s3}件\n" \
-               f"4. 下半身クリアした銘柄: {s4}件\n" \
-               f"5. 溜めクリアした銘柄: {s5}件\n" \
-               f"6. 右肩上がりクリアした銘柄: {s6}件\n" \
-               f"7. 長トレンドクリアした銘柄: {s7}件\n" \
-               f"8. 上ヒゲクリアした銘柄: {s8}件\n" \
-               f"9. 天井圏回避クリアした銘柄: {s9}件\n" \
-               f"10. 新高値更新クリアした銘柄: {s10}件\n" \
-               f"11. 週足60クリアした銘柄: {s11}件\n" \
-               f"12. 天井圏維持(完全合格)の銘柄: {s12}件\n\n" \
+               f"1. 全データ取得: {s1}件\n" \
+               f"2. 月足MA60クリア: {s2}件\n" \
+               f"3. 出来高5万株クリア: {s3}件\n" \
+               f"4. 下半身クリア: {s4}件\n" \
+               f"5. 溜めクリア: {s5}件\n" \
+               f"6. 右肩上がりクリア: {s6}件\n" \
+               f"7. 長トレンドクリア: {s7}件\n" \
+               f"8. 上ヒゲクリア: {s8}件\n" \
+               f"9. 天井圏回避クリア: {s9}件\n" \
+               f"10. 新高値更新クリア: {s10}件\n" \
+               f"11. 週足60クリア: {s11}件\n" \
+               f"12. 天井圏維持(完全合格): {s12}件\n\n" \
                f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
                f"【詳細（各銘柄の最終判定ステージ）】\n"
                
-        body += f"7. 長トレンドで留まった銘柄:\n" + "\n".join(stages_output["trend_align"]) + "\n\n" \
-                f"8. 上ヒゲクリアで留まった銘柄:\n" + "\n".join(stages_output["upper_shadow"]) + "\n\n" \
-                f"9. 天井圏回避で留まった銘柄:\n" + "\n".join(stages_output["ceiling_avoid"]) + "\n\n" \
-                f"10. 新高値更新で留まった銘柄:\n" + "\n".join(stages_output["new_high_pass"]) + "\n\n" \
-                f"11. 週足60クリアで留まった銘柄:\n" + "\n".join(stages_output["weekly_ma_pass"]) + "\n\n" \
-                f"12. 天井圏維持(完全合格)の銘柄:\n" + "\n".join(final_passed_list) + "\n\n" \
+        body += f"7. 長期トレンド:\n" + "\n".join(stages_output["trend_align"]) + "\n\n" \
+                f"8. 上ヒゲクリア:\n" + "\n".join(stages_output["upper_shadow"]) + "\n\n" \
+                f"9. 天井圏回避:\n" + "\n".join(stages_output["ceiling_avoid"]) + "\n\n" \
+                f"10. 新高値更新:\n" + "\n".join(stages_output["new_high_pass"]) + "\n\n" \
+                f"11. 週足60クリア:\n" + "\n".join(stages_output["weekly_ma_pass"]) + "\n\n" \
+                f"12. 天井圏維持(完全合格):\n" + "\n".join(final_passed_list) + "\n\n" \
                 f"--------------------------------------------------\n" \
                 f"【条件一覧】\n" \
                 f"1. 全データ取得成功\n" \
