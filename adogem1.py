@@ -308,4 +308,181 @@ def analyze_stock(symbol):
         df['MA300'] = df['Close'].rolling(300).mean() if len(df) >= 300 else None
         
         today, yest, yest2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
-        close, open_p, high, low = today['Close'], today['Open'], today['High'], today
+        close, open_p, high, low = today['Close'], today['Open'], today['High'], today['Low']
+        ma5_t, ma20_t, ma60_t, ma100_t, ma300_t = today['MA5'], today['MA20'], today['MA60'], today['MA100'], today['MA300']
+
+        ppp_label = ""
+        if ma300_t is not None and pd.notna(ma300_t) and (ma5_t > ma20_t > ma60_t > ma100_t > ma300_t): 
+            ppp_label = "★PPP "
+        elif (ma5_t > ma20_t > ma60_t > ma100_t): 
+            ppp_label = "★PPP(Short) "
+            
+        stock_text = f"■ {symbol} | {int(close)}円"
+
+        if day_range := high - low:
+            body_size = abs(close - open_p)
+            if (body_size / day_range) < 0.05:
+                high_box, low_box = max(close, open_p), min(close, open_p)
+                if ((high - high_box) / day_range) >= 0.25 and ((low_box - low) / day_range) >= 0.25:
+                    stats["stage1_fetched"] += 1  
+                    return "SKIP"
+
+        # ───【4. 下半身クリア】───
+        if not (ma5_t < close) or close <= open_p: 
+            stats["stage4_kahanshin"] += 1
+            return "SKIP" 
+        
+        # ───【5. 溜めクリア】───
+        if yest['Close'] >= yest['MA5'] or yest2['Close'] >= yest2['MA5']: 
+            stats["stage5_tame"] += 1
+            return "SKIP"
+
+        # ───【6. 右肩上がり】───
+        if ma60_t <= yest['MA60']: 
+            stats["stage6_ma60_up"] += 1
+            return "SKIP" 
+
+        # ───【7. 長トレンド】───
+        if ma100_t <= yest['MA100']: 
+            stats["stage7_trend_up"] += 1
+            sheet1_final_log[symbol] = {"price": int(close), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
+            return "SKIP"
+
+        # ───【8. 上ヒゲクリア】───
+        if (high - close) >= ((close - open_p) * 1.5): 
+            stats["stage8_upper_shadow"] += 1
+            sheet1_final_log[symbol] = {"price": int(close), "stage_key": "upper_shadow", "ppp_label": ppp_label, "date": data_date}
+            return "SKIP"
+        
+        # ───【9. 天井圏回避】───
+        if ma100_t <= close <= (ma100_t * 1.03): 
+            stats["stage9_ceiling_avoid"] += 1
+            sheet1_final_log[symbol] = {"price": int(close), "stage_key": "ceiling_avoid", "ppp_label": ppp_label, "date": data_date}
+            return "SKIP"
+
+        # ───【10. 新高値更新】───
+        highest_5d = df['High'].iloc[-6:-1].max() if len(df) >= 6 else df['High'].iloc[:-1].max()
+        if close <= highest_5d: 
+            stats["stage10_new_high"] += 1
+            sheet1_final_log[symbol] = {"price": int(close), "stage_key": "new_high_pass", "ppp_label": ppp_label, "date": data_date}
+            return "SKIP"
+
+        # ───【11：週足60クリア】───
+        weekly_close = df['Close'].resample('W').last()
+        if len(weekly_close) >= 60:
+            weekly_ma60 = weekly_close.rolling(60).mean()
+            if weekly_close.iloc[-1] < weekly_ma60.iloc[-1]:
+                stats["stage11_weekly_60ma"] += 1
+                sheet1_final_log[symbol] = {"price": int(close), "stage_key": "weekly_ma_pass", "ppp_label": ppp_label, "date": data_date}
+                return "SKIP"
+
+        # ───【12：天井圏維持】───
+        if len(monthly_close) >= 24:
+            monthly_ma24 = monthly_close.rolling(24).mean()
+            if close < (monthly_ma24.iloc[-1] * 0.80):
+                stats["stage12_monthly_ma24"] += 1  
+                sheet1_final_log[symbol] = {"price": int(close), "stage_key": "monthly_high_pass", "ppp_label": ppp_label, "date": data_date}
+                return "SKIP"
+
+        # ───【すべての条件を完全突破（ステージ12クリア合格）】───
+        sheet1_final_log[symbol] = {"price": int(close), "stage_key": "monthly_high_pass", "ppp_label": ppp_label, "date": data_date}
+        
+        # シート2保存用（完全合格銘柄のみを厳格に保持）
+        selected_stocks[symbol] = {
+            "price": int(close), 
+            "ppp_label": ppp_label,
+            "date": data_date  
+        }
+
+        if "★PPP " in ppp_label: stats["★PPP"] += 1
+        elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
+        else: stats["normal_detect"] += 1
+        return f"{ppp_label}{stock_text}"
+    except:
+        return "ERROR"
+
+def get_target_symbols(start, end):
+    return [str(i) for i in range(start, end)]
+
+def main():
+    start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
+    try:
+        if start_range == 1300:
+            update_yesterday_results()
+            time.sleep(2)
+            
+        symbols = get_target_symbols(start_range, end_range)
+        for symbol in symbols:
+            analyze_stock(symbol)
+        
+        record_to_spreadsheet() 
+        record_to_sheet2()      
+        
+        stages_output = {
+            "trend_align": [], "upper_shadow": [], "ceiling_avoid": [], 
+            "new_high_pass": [], "weekly_ma_pass": [], "monthly_high_pass": []
+        }
+        for code, row_data in sheet1_final_log.items():
+            k = row_data["stage_key"]
+            if k not in stages_output: continue 
+            ppp = row_data["ppp_label"]
+            item_str = f"  ■ {code} | {row_data['price']}円" if not ppp else f"  {ppp}■ {code} | {row_data['price']}円"
+            stages_output[k].append(item_str)
+
+        # 完全合格銘柄は、selected_stocksのキーから正確なリストを生成
+        final_passed_list = []
+        for code in sorted(selected_stocks.keys()):
+            ppp = selected_stocks[code]["ppp_label"]
+            price = selected_stocks[code]["price"]
+            item_str = f"  ■ {code} | {price}円" if not ppp else f"  {ppp}■ {code} | {price}円"
+            final_passed_list.append(item_str)
+
+        # 12の「詳細リスト」と「件数」を完全合格（selected_stocks）の数に完全一致させる
+        body = f"総対象: {len(symbols)}件\n\n" \
+               f"【各ステージで留まった(脱落・合格)件数】\n" \
+               f"7. 長トレンドで留まった銘柄: {len(stages_output['trend_align'])}件\n" \
+               f"8. 上ヒゲクリアで留まった銘柄: {len(stages_output['upper_shadow'])}件\n" \
+               f"9. 天井圏回避で留まった銘柄: {len(stages_output['ceiling_avoid'])}件\n" \
+               f"10. 新高値更新で留まった銘柄: {len(stages_output['new_high_pass'])}件\n" \
+               f"11. 週足60クリアで留まった銘柄: {len(stages_output['weekly_ma_pass'])}件\n" \
+               f"12. 天井圏維持(完全合格)の銘柄: {len(final_passed_list)}件\n\n" \
+               f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
+               f"【詳細（各銘柄の最終判定ステージ）】\n"
+               
+        body += f"7. 長トレンドで留まった銘柄:\n" + "\n".join(stages_output["trend_align"]) + "\n\n" \
+                f"8. 上ヒゲクリアで留まった銘柄:\n" + "\n".join(stages_output["upper_shadow"]) + "\n\n" \
+                f"9. 天井圏回避で留まった銘柄:\n" + "\n".join(stages_output["ceiling_avoid"]) + "\n\n" \
+                f"10. 新高値更新で留まった銘柄:\n" + "\n".join(stages_output["new_high_pass"]) + "\n\n" \
+                f"11. 週足60クリアで留まった銘柄:\n" + "\n".join(stages_output["weekly_ma_pass"]) + "\n\n" \
+                f"12. 天井圏維持(完全合格)の銘柄:\n" + "\n".join(final_passed_list) + "\n\n" \
+                f"--------------------------------------------------\n" \
+                f"【条件一覧】\n" \
+                f"1. 全データ取得成功\n" \
+                f"2. 月足MA60クリア\n" \
+                f"3. 出来高5万株クリア\n" \
+                f"4. 下半身クリア\n" \
+                f"5. 溜めMA5クリア（MA5以上削除）\n" \
+                f"6. 右肩上がり（MA60以下削除）\n" \
+                f"7. 長期トレンド（MA100が前日より上昇）\n" \
+                f"8. 上ヒゲクリア（上ヒゲが実態の1.5以上削除）\n" \
+                f"9. 天井圏MA100回避（MA100の3％以内削除）\n" \
+                f"10. 新高値MA5更新\n" \
+                f"11. 週足MA60クリア\n" \
+                f"12. 天井圏維持（月足MA24の20%以上削除）\n" \
+                f"--------------------------------------------------\n" \
+                f"【判定結果マーク基準】翌日終値\n" \
+                f" ◎ ： +2.0%以上\n" \
+                f" ◯ ： +0.1%〜+2.0%\n" \
+                f" ▲ ： -0.1%〜+0.1%\n" \
+                f" ✕ ： -0.1%未満\n" \
+                f"--------------------------------------------------"
+
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = SENDER_EMAIL
+        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 完全合格:{len(final_passed_list)}件"
+        msg.attach(MIMEText(body, 'plain'))
+        
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SEN
