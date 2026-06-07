@@ -485,4 +485,14 @@ def main():
         
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
-        server.login(SENDER_EMAIL, SEN
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print("スキャンおよびレポートメール送信完了")
+        
+    except Exception as e:
+        send_error_email(traceback.format_exc(), start_range, end_range)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
