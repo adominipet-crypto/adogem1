@@ -190,4 +190,87 @@ def record_to_sheet2():
             data_date = data["date"]  
             
             # --- 1行目 ---
-            cell_updates.append(gspread.Cell(
+            cell_updates.append(gspread.Cell(r, 1, data_date))              
+            cell_updates.append(gspread.Cell(r, 2, code))                 
+            cell_updates.append(gspread.Cell(r, 3, price))                
+            cell_updates.append(gspread.Cell(r, 4, ""))                   
+            cell_updates.append(gspread.Cell(r, 5, "翌日終値"))           
+            for day in range(3, 16):
+                cell_updates.append(gspread.Cell(r, 3 + day, f"{day}営業日"))
+            cell_updates.append(gspread.Cell(r, 19, "差額(対選定)"))       
+            cell_updates.append(gspread.Cell(r, 20, "判定(対選定)"))       
+            cell_updates.append(gspread.Cell(r, 21, "比率(%)"))            
+
+            # --- 2行目 ---
+            cell_updates.append(gspread.Cell(r + 1, 1, "通過条件ステージ")) 
+            cell_updates.append(gspread.Cell(r + 1, 2, "12. 天井圏維持"))    
+            cell_updates.append(gspread.Cell(r + 1, 4, ""))                 
+            cell_updates.append(gspread.Cell(r + 1, 5, "判定待ち"))         
+            for day in range(3, 16):
+                cell_updates.append(gspread.Cell(r + 1, 3 + day, "判定"))
+            cell_updates.append(gspread.Cell(r + 1, 19, "差額枠"))
+            cell_updates.append(gspread.Cell(r + 1, 20, "判定枠"))
+            cell_updates.append(gspread.Cell(r + 1, 21, "比率枠"))
+
+            # --- 3行目 ---
+            cell_updates.append(gspread.Cell(r + 2, 1, "PPP"))              
+            cell_updates.append(gspread.Cell(r + 2, 2, ppp_status))         
+            cell_updates.append(gspread.Cell(r + 2, 5, "前日比(%)"))        
+            for day in range(3, 16):
+                cell_updates.append(gspread.Cell(r + 2, 3 + day, "前日比(%)"))
+
+            # --- 4行目 ---
+            cell_updates.append(gspread.Cell(r + 3, 1, ""))
+            cell_updates.append(gspread.Cell(r + 3, 2, ""))
+
+        if cell_updates:
+            sheet2.update_cells(cell_updates, value_input_option='RAW')
+            print(f"【シート2記録】完全規定合格(ステージ12) {len(sorted_codes)} 件をシート2に追記しました。")
+            time.sleep(3)
+            
+    except Exception as e:
+        print(f"シート2記録エラー: {e}")
+        raise e
+
+def update_yesterday_results():
+    try:
+        sheet = connect_spreadsheet("シート1")
+        all_records = sheet.get_all_values()
+        cell_list = []
+        
+        for i, row in enumerate(all_records):
+            if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
+            code = row[1]
+            
+            try:
+                selected_price = int(row[4])
+            except ValueError:
+                continue
+                
+            df = get_stock_data_fallback(code)
+            
+            if df is not None and len(df) >= 1:
+                next_close = int(df['Close'].iloc[-1])
+                if next_close == selected_price and len(df) >= 2:
+                    next_close = int(df['Close'].iloc[-2])
+                pct = ((next_close - selected_price) / selected_price) * 100
+                
+                if pct >= 2.0:
+                    mark = "◎"
+                elif pct >= 0.1:
+                    mark = "◯"
+                elif pct > -0.1:
+                    mark = "▲"
+                else:
+                    mark = "✕"
+                
+                cell_list.append(gspread.Cell(i + 1, 6, next_close))
+                cell_list.append(gspread.Cell(i + 1, 7, mark))
+                cell_list.append(gspread.Cell(i + 1, 8, f"{pct:+.2f}%"))
+                print(f"【答え合わせ完了】シート1 {code}: {mark} ({pct:+.2f}%)")
+                
+                time.sleep(0.5)
+        
+        if cell_list:
+            sheet.update_cells(cell_list)
+            print(f"【
