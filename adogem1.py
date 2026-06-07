@@ -255,7 +255,7 @@ def update_yesterday_results():
                     next_close = int(df['Close'].iloc[-2])
                 pct = ((next_close - selected_price) / selected_price) * 100
                 
-                # ご指定の基準に完全に一致させた判定ロジック
+                # 判定結果マーク基準
                 if pct >= 2.0:
                     mark = "◎"
                 elif pct >= 0.1:
@@ -354,8 +354,10 @@ def analyze_stock(symbol):
         stats["stage9_ceiling_avoid"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "ceiling_avoid", "ppp_label": ppp_label, "date": data_date}
 
-        # ───【10. 新高値更新】───
-        if close <= ma5_t: return "SKIP"
+        # ───【10. 新高値更新（過去5営業日の最高値更新に修正）】───
+        # 本日を除く直近5日間の最高値
+        highest_5d = df['High'].iloc[-6:-1].max() if len(df) >= 6 else df['High'].iloc[:-1].max()
+        if close <= highest_5d: return "SKIP"
         stats["stage10_new_high"] += 1
         sheet1_final_log[symbol] = {"price": int(close), "stage_key": "new_high_pass", "ppp_label": ppp_label, "date": data_date}
 
