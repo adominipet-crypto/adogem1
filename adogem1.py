@@ -104,7 +104,7 @@ def get_stock_data_fallback(symbol):
         last_data_date = df.index[-1].date()
         today = datetime.date.today()
         
-        # 時差や週末（土日・月曜早朝）を考慮し、10日前までのデータであれば有効データとして受け入れる（厳しすぎる条件を緩和）
+        # 時差や週末を考慮し、10日前までのデータであれば有効データとして受け入れる
         if (last_data_date > today and (last_data_date - today).days > 1) or (today - last_data_date).days > 10:
             return None
             
@@ -430,60 +430,4 @@ def main():
         s4 = stage_survivors['stage4']
         s5 = stage_survivors['stage5']
         s6 = stage_survivors['stage6']
-        s7 = stage_survivors['stage7']
-        s8 = stage_survivors['stage8']
-        s9 = stage_survivors['stage9']
-        s10 = stage_survivors['stage10']
-        s11 = stage_survivors['stage11']
-        s12 = len(final_passed_list)
-
-        body = f"総対象: {total_len}件\n\n" \
-               f"【各ステージの生存（クリア）件数】\n" \
-               f"1. 全データ取得: {s1}件\n" \
-               f"2. 月足MA60クリア: {s2}件\n" \
-               f"3. 出来高5万株クリア: {s3}件\n" \
-               f"4. 下半身クリア: {s4}件\n" \
-               f"5. 溜めクリア: {s5}件\n" \
-               f"6. 右肩上がりクリア: {s6}件\n" \
-               f"7. 長期トレンドクリア: {s7}件\n" \
-               f"8. 上ヒゲクリア: {s8}件\n" \
-               f"9. 天井圏回避クリア: {s9}件\n" \
-               f"10. 新高値更新クリア: {s10}件\n" \
-               f"11. 週足60クリア: {s11}件\n" \
-               f"12. 天井圏維持(完全合格): {s12}件\n\n" \
-               f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n" \
-               f"【詳細（各銘柄の最終判定ステージ）】\n"
-               
-        body += f"7. 長期トレンド:\n" + "\n".join(stages_output["trend_align"]) + "\n\n" \
-                f"8. 上ヒゲクリア:\n" + "\n".join(stages_output["upper_shadow"]) + "\n\n" \
-                f"9. 天井圏回避:\n" + "\n".join(stages_output["ceiling_avoid"]) + "\n\n" \
-                f"10. 新高値更新:\n" + "\n".join(stages_output["new_high_pass"]) + "\n\n" \
-                f"11. 週足60クリア:\n" + "\n".join(stages_output["weekly_ma_pass"]) + "\n\n" \
-                f"12. 天井圏維持(完全合格):\n" + "\n".join(final_passed_list) + "\n\n" \
-                f"--------------------------------------------------\n" \
-                f"【条件一覧】\n" \
-                f"1. 全データ取得成功\n" \
-                f"2. 月足MA60クリア\n" \
-                f"3. 出来高5万株クリア\n" \
-                f"4. 下半身クリア\n" \
-                f"5. 溜めMA5クリア（MA5以上削除）\n" \
-                f"6. 右肩上がり（MA60以下削除）\n" \
-                f"7. 長期トレンド（MA100が前日より上昇）\n" \
-                f"8. 上ヒゲクリア（上ヒゲが実態の1.5以上削除）\n" \
-                f"9. 天井圏MA100回避（MA100の3％以内削除）\n" \
-                f"10. 新高値MA5更新\n" \
-                f"11. 週足MA60クリア\n" \
-                f"12. 天井圏維持（月足MA24の20%以上削除）\n" \
-                f"--------------------------------------------------\n" \
-                f"【判定結果マーク基準】翌日終値\n" \
-                f" ◎ ： +2.0%以上\n" \
-                f" ◯ ： +0.1%〜+2.0%\n" \
-                f" ▲ ： -0.1%〜+0.1%\n" \
-                f" ✕ ： -0.1%未満\n" \
-                f"--------------------------------------------------"
-
-        msg = MIMEMultipart()
-        msg['From'] = SENDER_EMAIL
-        msg['To'] = SENDER_EMAIL
-        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 完全合格:{s12}件"
-        m
+        s7 = stage_survivors
