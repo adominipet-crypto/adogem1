@@ -474,7 +474,7 @@ def main():
                 f"10. 新高値MA5更新\n" \
                 f"11. 週足MA60クリア\n" \
                 f"12. 天井圏維持（月足MA24の20%以上削除）\n" \
-                --------------------------------------------------\n" \
+                f"--------------------------------------------------\n" \
                 f"【判定結果マーク基準】翌日終値\n" \
                 f" ◎ ： +2.0%以上\n" \
                 f" ◯ ： +0.1%〜+2.0%\n" \
@@ -486,4 +486,4 @@ def main():
         msg['From'] = SENDER_EMAIL
         msg['To'] = SENDER_EMAIL
         msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 完全合格:{s12}件"
-        msg.attach(MIMEText(body
+        msg.attach(MIMEText(bo
