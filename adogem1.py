@@ -104,13 +104,17 @@ def get_stock_data_fallback(symbol):
         last_data_date = df.index[-1].date()
         today = datetime.date.today()
         
-        if last_data_date > today or (today - last_data_date).days > 7:
+        # 時差や週末（土日・月曜早朝）を考慮し、10日前までのデータであれば有効データとして受け入れる（厳しすぎる条件を緩和）
+        if (last_data_date > today and (last_data_date - today).days > 1) or (today - last_data_date).days > 10:
             return None
             
         last_row = df.iloc[-1]
         prev_row = df.iloc[-2]
-        if last_row['Close'] == prev_row['Close'] and last_row['High'] == prev_row['High'] and last_row['Volume'] < 100:
-            df = df.iloc[:-1]
+        
+        # 当日のリアルタイム暫定データ（出来高が極小で株価が変化していないプレマーケット等）のみを除外する
+        if last_data_date == today and last_row['Volume'] < 100:
+            if last_row['Close'] == prev_row['Close'] and last_row['High'] == prev_row['High']:
+                df = df.iloc[:-1]
             
         return df
     except:
@@ -482,18 +486,4 @@ def main():
         msg['From'] = SENDER_EMAIL
         msg['To'] = SENDER_EMAIL
         msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 完全合格:{s12}件"
-        msg.attach(MIMEText(body, 'plain'))
-        
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-        print("スキャンおよびレポートメール送信完了")
-        
-    except Exception as e:
-        send_error_email(traceback.format_exc(), start_range, end_range)
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
+        m
