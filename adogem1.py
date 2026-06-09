@@ -9,21 +9,19 @@ import os, time, sys, datetime, gspread, json, requests, traceback
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError  
 
+# --- 環境設定 ---
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
-stage_survivors = {
-    "stage1": 0, "stage2": 0, "stage3": 0, "stage4": 0, "stage5": 0, "stage6": 0,
-    "stage7": 0, "stage8": 0, "stage9": 0, "stage10": 0, "stage11": 0, "stage12": 0
-}
-
+# --- グローバル変数 ---
+stage_survivors = {f"stage{i}": 0 for i in range(1, 13)}
 stats = {"★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0}
 sheet1_final_log = {}
 selected_stocks = {}
-detected_data_date = "未取得"
 GLOBAL_LATEST_DATE = None  
 ans_report_lines = [] 
 
+# --- 共通関数 ---
 def fetch_global_latest_date():
     global GLOBAL_LATEST_DATE
     try:
@@ -40,7 +38,7 @@ def fetch_global_latest_date():
 
 def connect_spreadsheet(sheet_name="シート1"):
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_info(json.loads(os.environ.get('GCP_SA_KEY')))
+    creds = Credentials.from_service_account_info(json.loads(os.environ.get('GCP_SA_KEY')), scopes=scopes)
     return gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ").worksheet(sheet_name)
 
 def get_stock_data_fallback(symbol, force_check_date=True):
@@ -58,48 +56,162 @@ def get_stock_data_fallback(symbol, force_check_date=True):
         return df
     except: return None
 
+def get_next_trading_day_data(symbol, base_date):
+    """商いのある翌営業日を自動取得（休場スキップ）"""
+    try:
+        df = get_stock_data_fallback(symbol, force_check_date=False)
+        if df is None: return None
+        future_df = df[df.index.date > base_date]
+        return future_df.iloc[0] if not future_df.empty else None
+    except: return None
+
+# --- 判定処理 ---
 def update_yesterday_results():
     global ans_report_lines
-    sheet = connect_spreadsheet("シート1")
-    all_records = sheet.get_all_values()
-    cell_list = []
-    ans_report_lines.append("【本日確定の判定結果】")
-    for i, row in enumerate(all_records):
-        if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
-        code, sel_date = row[1], datetime.datetime.strptime(row[0], "%Y-%m-%d").date()
-        df = get_stock_data_fallback(code, force_check_date=False)
-        if df is not None:
-            future_df = df[df.index.date > sel_date]
-            if not future_df.empty:
-                next_data = future_df.iloc[0]
-                next_close, selected_price = int(next_data['Close']), int(row[4])
+    try:
+        sheet = connect_spreadsheet("シート1")
+        all_records = sheet.get_all_values()
+        cell_list = []
+        ans_report_lines.append("【本日確定の判定結果】")
+        for i, row in enumerate(all_records):
+            if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
+            code, row_date_str = row[1], row[0]
+            try: 
+                selected_price = int(row[4])
+                sel_date = datetime.datetime.strptime(row_date_str, "%Y-%m-%d").date()
+            except: continue
+            
+            next_data = get_next_trading_day_data(code, sel_date)
+            if next_data is not None:
+                next_close = int(next_data['Close'])
                 pct = ((next_close - selected_price) / selected_price) * 100
                 mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
                 cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
-                ans_report_lines.append(f"  {mark} ■ {code} | {selected_price}円 ({row[0][5:]}) → {next_close}円 ({pct:+.2f}%)")
-    if len(ans_report_lines) == 1: ans_report_lines.append("  該当なし")
-    if cell_list: sheet.update_cells(cell_list)
+                ans_report_lines.append(f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)")
+        if len(ans_report_lines) == 1: ans_report_lines.append("  該当なし")
+        if cell_list: sheet.update_cells(cell_list)
+    except Exception as e: print(f"Sheet1判定エラー: {e}")
 
-def record_to_spreadsheet():
-    sheet = connect_spreadsheet("シート1")
-    new_rows = []
-    for code, row_data in sheet1_final_log.items():
-        if row_data["stage_key"] not in ["trend_align", "upper_shadow", "ceiling_avoid", "new_high_pass", "weekly_ma_pass", "monthly_high_pass", "completed_pass"]: continue
-        stage_map = {"trend_align": "7. 長トレンド", "upper_shadow": "8. 上ヒゲ", "ceiling_avoid": "9. 天井圏回避", "new_high_pass": "10. 新高値", "weekly_ma_pass": "11. 週足60", "monthly_high_pass": "12. 天井圏維持", "completed_pass": "12. 天井圏維持"}
-        new_rows.append([row_data["date"], code, stage_map[row_data["stage_key"]], row_data["ppp_label"].strip() or "通常", row_data["price"], "", "判定待ち", ""])
-    if new_rows: sheet.append_rows(new_rows, value_input_option='RAW')
+def update_sheet2_results():
+    try:
+        sheet2 = connect_spreadsheet("シート2")
+        all_records = sheet2.get_all_values()
+        cell_list = []
+        for i in range(0, len(all_records), 4):
+            if i >= len(all_records) or len(all_records[i]) < 3: continue
+            data_date_str, code = all_records[i][0], all_records[i][1]
+            if not code or data_date_str == "選定日付": continue
+            try: 
+                selected_price = int(all_records[i][2])
+                sel_date = datetime.datetime.strptime(data_date_str, "%Y-%m-%d").date()
+            except: continue
+            
+            df = get_stock_data_fallback(code, force_check_date=False)
+            if df is None: continue
+            future_df = df[df.index.date > sel_date]
+            if future_df.empty: continue
+            
+            first_day = future_df.iloc[0]
+            close_1 = int(first_day['Close'])
+            pct_1 = ((close_1 - selected_price) / selected_price) * 100
+            cell_list.extend([gspread.Cell(i+2, 5, close_1), gspread.Cell(i+3, 5, f"{pct_1:+.2f}%")])
+            
+            for day_idx in range(1, min(len(future_df), 15)):
+                col = day_idx + 5
+                close_curr = int(future_df.iloc[day_idx]['Close'])
+                close_prev = int(future_df.iloc[day_idx-1]['Close'])
+                pct_day = ((close_curr - close_prev) / close_prev) * 100
+                cell_list.extend([gspread.Cell(i+2, col, close_curr), gspread.Cell(i+3, col, f"{pct_day:+.2f}%")])
+        if cell_list: sheet2.update_cells(cell_list, value_input_option='RAW')
+    except Exception as e: print(f"Sheet2更新エラー: {e}")
 
+# --- スキャン処理 ---
 def analyze_stock(symbol):
     df = get_stock_data_fallback(symbol, force_check_date=True)
     if df is None: return "SKIP"
     
-    # (ステージ判定処理：既存のロジックを継続)
-    # 最後にログへ保存する際は date_short = data_date[5:] を使用
-    # ... (前回のanalyze_stock関数と同じロジックを配置) ...
+    stage_survivors["stage1"] += 1
+    monthly_close = df['Close'].resample('ME').last()
+    if len(monthly_close) < 60 or df['Close'].iloc[-1] < monthly_close.rolling(60).mean().iloc[-1]: return "SKIP"
+    
+    stage_survivors["stage2"] += 1
+    if df['Volume'].iloc[-1] < 50000: return "SKIP"
+    
+    stage_survivors["stage3"] += 1
+    data_date = df.index[-1].strftime("%Y-%m-%d")
+    df['MA5'] = df['Close'].rolling(5).mean()
+    df['MA20'] = df['Close'].rolling(20).mean()
+    df['MA60'] = df['Close'].rolling(60).mean()
+    df['MA100'] = df['Close'].rolling(100).mean()
+    df['MA300'] = df['Close'].rolling(300).mean()
+    
+    today, yest, yest2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
+    if not (today['MA5'] < today['Close']) or today['Close'] <= today['Open'] or yest['Close'] >= yest['MA5'] or yest2['Close'] >= yest2['MA5']: return "SKIP"
+    
+    stage_survivors["stage4"] += 1
+    if today['MA60'] <= yest['MA60']: return "SKIP"
+    stage_survivors["stage5"] += 1
+    
+    ppp_label = "★PPP " if (today['MA5'] > today['MA20'] > today['MA60'] > today['MA100'] > (today['MA300'] if pd.notna(today['MA300']) else 0)) else ("★PPP(Short) " if (today['MA5'] > today['MA20'] > today['MA60'] > today['MA100']) else "")
+    
+    # 判定ステージ（長期トレンド以降）
+    if today['MA100'] <= yest['MA100']: 
+        sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    stage_survivors["stage7"] += 1
+    if (today['High'] - today['Close']) >= ((today['Close'] - today['Open']) * 1.5):
+        sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "upper_shadow", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    stage_survivors["stage8"] += 1
+    if today['MA100'] <= today['Close'] <= (today['MA100'] * 1.03):
+        sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "ceiling_avoid", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    stage_survivors["stage9"] += 1
+    if today['Close'] <= df['High'].iloc[-6:-1].max():
+        sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "new_high_pass", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    stage_survivors["stage10"] += 1
+    if df['Close'].resample('W').last().rolling(60).mean().iloc[-1] > df['Close'].resample('W').last().iloc[-1]:
+        sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "weekly_ma_pass", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    stage_survivors["stage11"] += 1
+    if today['Close'] < (monthly_close.rolling(24).mean().iloc[-1] * 0.80):
+        sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "monthly_high_pass", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+
+    sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "completed_pass", "ppp_label": ppp_label, "date": data_date}
+    selected_stocks[symbol] = {"price": int(today['Close']), "ppp_label": ppp_label, "date": data_date}
+    if "★PPP " in ppp_label: stats["★PPP"] += 1
+    elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
+    else: stats["normal_detect"] += 1
+    return "OK"
+
+def record_to_spreadsheet():
+    sheet = connect_spreadsheet("シート1")
+    new_rows = [[r["date"], code, {"trend_align":"7. 長トレンド","upper_shadow":"8. 上ヒゲ","ceiling_avoid":"9. 天井圏回避","new_high_pass":"10. 新高値","weekly_ma_pass":"11. 週足60","monthly_high_pass":"12. 天井圏維持","completed_pass":"12. 天井圏維持"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in ["trend_align", "upper_shadow", "ceiling_avoid", "new_high_pass", "weekly_ma_pass", "monthly_high_pass", "completed_pass"]]
+    if new_rows: sheet.append_rows(new_rows, value_input_option='RAW')
 
 def main():
     fetch_global_latest_date()
     update_yesterday_results()
-    # (銘柄ループ処理など)
-    # ...
-    # メール生成時に ans_report_lines を先頭に結合
+    update_sheet2_results()
+    
+    start_r, end_r = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
+    for s in [str(i) for i in range(start_r, end_r)]: analyze_stock(s)
+    
+    record_to_spreadsheet()
+    
+    final_list = [f"  {'★PPP ' in s['ppp_label'] and s['ppp_label'] or ''}■ {code} | {s['price']}円 ({s['date'][5:]})" for code, s in sorted(selected_stocks.items())]
+    header = f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}"
+    body = "\n".join(ans_report_lines) + f"\n\n==================================================\n{header}\n総対象: {end_r-start_r}件\n\n【各ステージ生存数】\n1.取得: {stage_survivors['stage1']} | 2.月足60: {stage_survivors['stage2']} | 3.出来高: {stage_survivors['stage3']} | 4.下半身: {stage_survivors['stage4']} | 5.溜め: {stage_survivors['stage5']} | 6.右肩: {stage_survivors['stage6']} | 7.長期T: {stage_survivors['stage7']} | 8.上ヒゲ: {stage_survivors['stage8']} | 9.天井回避: {stage_survivors['stage9']} | 10.新高値: {stage_survivors['stage10']} | 11.週足60: {stage_survivors['stage11']} | 12.天井維持: {len(final_list)}\n\n★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n" + "\n".join(final_list)
+    
+    msg = MIMEMultipart()
+    msg['From'], msg['To'], msg['Subject'] = SENDER_EMAIL, SENDER_EMAIL, f"📊 adoGEM レポート {len(final_list)}件"
+    msg.attach(MIMEText(body, 'plain'))
+    server = smtplib.SMTP("smtp.gmail.com", 587)
+    server.starttls()
+    server.login(SENDER_EMAIL, SENDER_PASSWORD)
+    server.send_message(msg)
+    server.quit()
+
+if __name__ == "__main__": main()
