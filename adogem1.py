@@ -230,6 +230,7 @@ def update_yesterday_results():
         for i, row in enumerate(all_records):
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
             code = row[1]
+            row_date_str = row[0] # シート上の選定日 (YYYY-MM-DD)
             
             try:
                 selected_price = int(row[4])
@@ -239,9 +240,14 @@ def update_yesterday_results():
             df = get_stock_data_fallback(code)
             
             if df is not None and len(df) >= 1:
+                last_data_date_str = df.index[-1].strftime("%Y-%m-%d")
+                
+                # 安全装置: 取得した最新データの日付がシート上の選定日付と同じなら、答え合わせはまだ早いのでスキップ
+                if last_data_date_str == row_date_str:
+                    print(f"【スキップ】シート1 {code}: 最新データが選定日({row_date_str})と同じなため、答え合わせを保留します。")
+                    continue
+                
                 next_close = int(df['Close'].iloc[-1])
-                if next_close == selected_price and len(df) >= 2:
-                    next_close = int(df['Close'].iloc[-2])
                 pct = ((next_close - selected_price) / selected_price) * 100
                 
                 if pct >= 2.0:
