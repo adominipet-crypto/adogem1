@@ -20,6 +20,7 @@ stage_survivors = {
 stats = {"★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0}
 sheet1_final_log = {}
 selected_stocks = {}
+detected_data_date = "未取得"  
 
 def connect_spreadsheet(sheet_name="シート1"):
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -96,7 +97,9 @@ def get_stock_data_fallback(symbol):
         }, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
         
         df.dropna(subset=["Close", "Volume"], inplace=True)
-        df = df[df['Volume'] > 0] 
+        
+        # 出来高が5万株未満の不完全なデータ行を完全に排除
+        df = df[df['Volume'] >= 50000] 
         df = df.sort_index()
         
         if df.empty or len(df) < 100: return None
@@ -106,13 +109,6 @@ def get_stock_data_fallback(symbol):
         
         if (last_data_date > today and (last_data_date - today).days > 1) or (today - last_data_date).days > 10:
             return None
-            
-        last_row = df.iloc[-1]
-        prev_row = df.iloc[-2]
-        
-        if last_data_date == today and last_row['Volume'] < 100:
-            if last_row['Close'] == prev_row['Close'] and last_row['High'] == prev_row['High']:
-                df = df.iloc[:-1]
             
         return df
     except:
@@ -230,7 +226,7 @@ def update_yesterday_results():
         for i, row in enumerate(all_records):
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
             code = row[1]
-            row_date_str = row[0] # シート上の選定日 (YYYY-MM-DD)
+            row_date_str = row[0] 
             
             try:
                 selected_price = int(row[4])
@@ -242,7 +238,6 @@ def update_yesterday_results():
             if df is not None and len(df) >= 1:
                 last_data_date_str = df.index[-1].strftime("%Y-%m-%d")
                 
-                # 安全装置: 取得した最新データの日付がシート上の選定日付と同じなら、答え合わせはまだ早いのでスキップ
                 if last_data_date_str == row_date_str:
                     print(f"【スキップ】シート1 {code}: 最新データが選定日({row_date_str})と同じなため、答え合わせを保留します。")
                     continue
@@ -360,6 +355,7 @@ def update_sheet2_results():
         raise e
 
 def analyze_stock(symbol):
+    global detected_data_date
     try:
         stage_survivors["stage1"] += 1
         df = get_stock_data_fallback(symbol)
@@ -372,9 +368,9 @@ def analyze_stock(symbol):
             if monthly_close.iloc[-1] < monthly_ma60.iloc[-1]: return "SKIP"
 
         stage_survivors["stage3"] += 1
-        if df['Volume'].iloc[-1] < 50000: return "SKIP"
-
+        
         data_date = df.index[-1].strftime("%Y-%m-%d")
+        detected_data_date = data_date  
 
         df['MA5'] = df['Close'].rolling(5).mean()
         df['MA20'] = df['Close'].rolling(20).mean()
@@ -391,8 +387,6 @@ def analyze_stock(symbol):
             ppp_label = "★PPP "
         elif (ma5_t > ma20_t > ma60_t > ma100_t): 
             ppp_label = "★PPP(Short) "
-            
-        stock_text = f"■ {symbol} | {int(close)}円"
 
         if day_range := high - low:
             body_size = abs(close - open_p)
@@ -452,7 +446,7 @@ def analyze_stock(symbol):
         if "★PPP " in ppp_label: stats["★PPP"] += 1
         elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
         else: stats["normal_detect"] += 1
-        return f"{ppp_label}{stock_text}"
+        return "OK"
     except:
         return "ERROR"
 
@@ -478,24 +472,29 @@ def main():
             "trend_align": [], "upper_shadow": [], "ceiling_avoid": [], 
             "new_high_pass": [], "weekly_ma_pass": [], "monthly_high_pass": [], "completed_pass": []
         }
+        
+        # ▼ 各銘柄の後ろに (取得した日付) を追加する処理 ▼
         for code, row_data in sheet1_final_log.items():
             k = row_data["stage_key"]
             if k not in stages_output: continue 
             ppp = row_data["ppp_label"]
-            item_str = f"  ■ {code} | {row_data['price']}円" if not ppp else f"  {ppp}■ {code} | {row_data['price']}円"
+            date_str = row_data["date"]
+            item_str = f"  ■ {code} | {row_data['price']}円 ({date_str})" if not ppp else f"  {ppp}■ {code} | {row_data['price']}円 ({date_str})"
             stages_output[k].append(item_str)
 
         final_passed_list = []
         for code in sorted(selected_stocks.keys()):
             ppp = selected_stocks[code]["ppp_label"]
             price = selected_stocks[code]["price"]
-            item_str = f"  ■ {code} | {price}円" if not ppp else f"  {ppp}■ {code} | {price}円"
+            date_str = selected_stocks[code]["date"]
+            item_str = f"  ■ {code} | {price}円 ({date_str})" if not ppp else f"  {ppp}■ {code} | {price}円 ({date_str})"
             final_passed_list.append(item_str)
 
         total_len = len(symbols)
         s12 = len(final_passed_list)
 
         body_lines = [
+            f"データ対象日(目安): {detected_data_date}",
             f"総対象: {total_len}件",
             "",
             "【各ステージの生存（クリア）件数】",
