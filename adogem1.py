@@ -471,7 +471,7 @@ def main():
         # 1日の始まり（コード1300からスキャンが開始された時）に、前日までの答え合わせを実行
         if start_range == 1300:
             update_yesterday_results()  # シート1自動更新
-            update_sheet2_results()     # シート2自動更新 (新規追加)
+            update_sheet2_results()     # シート2自動更新
             time.sleep(2)
             
         symbols = get_target_symbols(start_range, end_range)
@@ -492,4 +492,5 @@ def main():
             item_str = f"  ■ {code} | {row_data['price']}円" if not ppp else f"  {ppp}■ {code} | {row_data['price']}円"
             stages_output[k].append(item_str)
 
-        final_passed_list 
+        final_passed_list = []
+  
