@@ -12,17 +12,13 @@ from gspread.exceptions import APIError
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
-# 1〜12の各ステージに「到達して生存している」銘柄数を保持する辞書
 stage_survivors = {
     "stage1": 0, "stage2": 0, "stage3": 0, "stage4": 0, "stage5": 0, "stage6": 0,
     "stage7": 0, "stage8": 0, "stage9": 0, "stage10": 0, "stage11": 0, "stage12": 0
 }
 
 stats = {"★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0}
-
-# 1銘柄につき確定した最終判定のみを保持する辞書
 sheet1_final_log = {}
-# ステージ12を完全クリアした最終規定合格銘柄のみを保持する辞書（シート2用）
 selected_stocks = {}
 
 def connect_spreadsheet(sheet_name="シート1"):
@@ -274,13 +270,11 @@ def update_yesterday_results():
         raise e
 
 def update_sheet2_results():
-    """シート2の過去選定銘柄の経過（翌日〜15営業日終値、前日比、最終結果）を自動更新する関数"""
     try:
         sheet2 = connect_spreadsheet("シート2")
         all_records = sheet2.get_all_values()
         cell_list = []
         
-        # 4行ずつのブロック単位でスキャン
         for i in range(0, len(all_records), 4):
             if i >= len(all_records) or len(all_records[i]) < 3: continue
             
@@ -293,7 +287,6 @@ def update_sheet2_results():
             except ValueError:
                 continue
                 
-            # すでに15営業日目の判定が完了（T列2行目が埋まっている）しているものはスキップ
             if i + 1 < len(all_records) and len(all_records[i+1]) >= 21:
                 final_status = all_records[i+1][19]
                 if final_status and final_status != "判定枠" and final_status != "":
@@ -307,35 +300,30 @@ def update_sheet2_results():
             except ValueError:
                 continue
                 
-            # 選定日より未来の営業日データを抽出
             after_df = df[df.index.date > sel_date]
             if after_df.empty: continue
             
-            # --- 1. 翌日終値 (1営業日後) の更新 ---
             close_1 = int(after_df['Close'].iloc[0])
             pct_1 = ((close_1 - selected_price) / selected_price) * 100
             
-            # 2行目のE列(5)に実際の終値、3行目のE列(5)に前日比(対選定比)を上書き
             cell_list.append(gspread.Cell(i + 2, 5, close_1))
             cell_list.append(gspread.Cell(i + 3, 5, f"{pct_1:+.2f}%"))
             
-            # --- 2. 3〜15営業日後の更新 ---
             close_15 = None
             for day in range(3, 16):
-                idx = day - 1  # 3営業日後は after_df のインデックス 2
+                idx = day - 1
                 if len(after_df) > idx:
                     close_day = int(after_df['Close'].iloc[idx])
-                    prev_close = int(after_df['Close'].iloc[idx - 1]) # 1つ前の営業日の終値
+                    prev_close = int(after_df['Close'].iloc[idx - 1])
                     pct_day = ((close_day - prev_close) / prev_close) * 100
                     
-                    col = 3 + day  # day=3 のとき 6列目(F列)
+                    col = 3 + day
                     cell_list.append(gspread.Cell(i + 2, col, close_day))
                     cell_list.append(gspread.Cell(i + 3, col, f"{pct_day:+.2f}%"))
                     
                     if day == 15:
                         close_15 = close_day
             
-            # --- 3. 15営業日目の成果判定（最初と最後の比較） ---
             if close_15 is not None:
                 diff = close_15 - selected_price
                 pct_total = (diff / selected_price) * 100
@@ -349,9 +337,9 @@ def update_sheet2_results():
                 else:
                     mark = "✕"
                     
-                cell_list.append(gspread.Cell(i + 2, 19, diff))                 # S列(19): 差額
-                cell_list.append(gspread.Cell(i + 2, 20, mark))                 # T列(20): 判定
-                cell_list.append(gspread.Cell(i + 2, 21, f"{pct_total:+.2f}%")) # U列(21): 比率
+                cell_list.append(gspread.Cell(i + 2, 19, diff))
+                cell_list.append(gspread.Cell(i + 2, 20, mark))
+                cell_list.append(gspread.Cell(i + 2, 21, f"{pct_total:+.2f}%"))
                 print(f"【シート2完全確定】{code}: 15営業日終了結果 -> {mark} ({pct_total:+.2f}%)")
                 
             time.sleep(0.1)
@@ -468,10 +456,9 @@ def get_target_symbols(start, end):
 def main():
     start_range, end_range = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
     try:
-        # 1日の始まり（コード1300からスキャンが開始された時）に、前日までの答え合わせを実行
         if start_range == 1300:
-            update_yesterday_results()  # シート1自動更新
-            update_sheet2_results()     # シート2自動更新
+            update_yesterday_results()  
+            update_sheet2_results()     
             time.sleep(2)
             
         symbols = get_target_symbols(start_range, end_range)
@@ -493,4 +480,94 @@ def main():
             stages_output[k].append(item_str)
 
         final_passed_list = []
-  
+        for code in sorted(selected_stocks.keys()):
+            ppp = selected_stocks[code]["ppp_label"]
+            price = selected_stocks[code]["price"]
+            item_str = f"  ■ {code} | {price}円" if not ppp else f"  {ppp}■ {code} | {price}円"
+            final_passed_list.append(item_str)
+
+        total_len = len(symbols)
+        s12 = len(final_passed_list)
+
+        body_lines = [
+            f"総対象: {total_len}件",
+            "",
+            "【各ステージの生存（クリア）件数】",
+            f"1. 全データ取得: {stage_survivors['stage1']}件",
+            f"2. 月足MA60クリア: {stage_survivors['stage2']}件",
+            f"3. 出来高5万株クリア: {stage_survivors['stage3']}件",
+            f"4. 下半身クリア: {stage_survivors['stage4']}件",
+            f"5. 溜めクリア: {stage_survivors['stage5']}件",
+            f"6. 右肩上がりクリア: {stage_survivors['stage6']}件",
+            f"7. 長期トレンドクリア: {stage_survivors['stage7']}件",
+            f"8. 上ヒゲクリア: {stage_survivors['stage8']}件",
+            f"9. 天井圏回避クリア: {stage_survivors['stage9']}件",
+            f"10. 新高値更新クリア: {stage_survivors['stage10']}件",
+            f"11. 週足60クリア: {stage_survivors['stage11']}件",
+            f"12. 天井圏維持(完全合格): {s12}件",
+            "",
+            f"★PPP: {stats['★PPP']} / ★Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}",
+            "",
+            "【詳細（各銘柄の最終判定ステージ）】",
+            "7. 長期トレンド:",
+            "\n".join(stages_output["trend_align"]),
+            "",
+            "8. 上ヒゲクリア:",
+            "\n".join(stages_output["upper_shadow"]),
+            "",
+            "9. 天井圏回避:",
+            "\n".join(stages_output["ceiling_avoid"]),
+            "",
+            "10. 新高値更新:",
+            "\n".join(stages_output["new_high_pass"]),
+            "",
+            "11. 週足60クリア:",
+            "\n".join(stages_output["weekly_ma_pass"]),
+            "",
+            "12. 天井圏維持(完全合格):",
+            "\n".join(final_passed_list),
+            "",
+            "--------------------------------------------------",
+            "【条件一覧】",
+            "1. 全データ取得成功",
+            "2. 月足MA60クリア",
+            "3. 出来高5万株クリア",
+            "4. 下半身クリア",
+            "5. 溜めMA5クリア（MA5以上削除）",
+            "6. 右肩上がり（MA60以下削除）",
+            "7. 長期トレンド（MA100が前日より上昇）",
+            "8. 上ヒゲクリア（上ヒゲが実態の1.5以上削除）",
+            "9. 天井圏MA100回避（MA100の3％以内削除）",
+            "10. 新高値MA5更新",
+            "11. 週足MA60クリア",
+            "12. 天井圏維持（月足MA24の20%以上削除）",
+            "--------------------------------------------------",
+            "【判定結果マーク基準】翌日終値および15営業日結果",
+            " ◎ ： +2.0%以上",
+            " ◯ ： +0.1%〜+2.0%",
+            " ▲ ： -0.1%〜+0.1%",
+            " ✕ ： -0.1%未満",
+            "--------------------------------------------------"
+        ]
+
+        body = "\n".join(body_lines)
+
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = SENDER_EMAIL
+        msg['Subject'] = f"📊 adoGEM レポート ({start_range}-{end_range}) 完全合格:{s12}件"
+        msg.attach(MIMEText(body, 'plain'))
+        
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print("スキャンおよびレポートメール送信完了")
+        
+    except Exception as e:
+        send_error_email(traceback.format_exc(), start_range, end_range)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
