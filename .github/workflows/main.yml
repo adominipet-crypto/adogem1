@@ -1,0 +1,30 @@
+name: Stock Analysis Automator
+
+on:
+  schedule:
+    # 日本時間の朝6:30に実行する設定 (UTCで21:30)
+    - cron: '30 21 * * *'
+  # 手動でもボタン一つで実行できるようにする設定
+  workflow_dispatch:
+
+jobs:
+  run-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas requests gspread oauth2client
+
+      - name: Run Analysis Script
+        run: python adogem1.py
+        env:
+          # Google Drive/Sheetsの認証情報をGitHubのSecretsから読み込む
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
