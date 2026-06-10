@@ -19,7 +19,27 @@ stats = {"★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0}
 sheet1_final_log = {}
 selected_stocks = {}
 GLOBAL_LATEST_DATE = None  
-ans_report_lines = [] 
+# 判定結果をステージごとに分類して格納するディクショナリ
+stage_results_report = {
+    "trend_align": [],       # 2.月足60 (元のコードの保存ロジックに合わせ、各ステージでの生存数事の判定を受け皿にしています)
+    "upper_shadow": [],      # 8.上ヒゲ
+    "ceiling_avoid": [],     # 9.天井圏回避
+    "new_high_pass": [],     # 10.新高値
+    "weekly_ma_pass": [],    # 11.週足60
+    "monthly_high_pass": [], # 12.天井圏維持
+    "completed_pass": []     # 完全合格
+}
+
+# ステージの日本語表示用マッピング
+STAGE_LABELS = {
+    "trend_align": "2.月足60",
+    "upper_shadow": "8.上ヒゲ",
+    "ceiling_avoid": "9.天井回避",
+    "new_high_pass": "10.新高値",
+    "weekly_ma_pass": "11.週足60",
+    "monthly_high_pass": "12.天井維持",
+    "completed_pass": "完全合格"
+}
 
 # --- 共通関数 ---
 def fetch_global_latest_date():
@@ -67,15 +87,26 @@ def get_next_trading_day_data(symbol, base_date):
 
 # --- 判定処理 ---
 def update_yesterday_results():
-    global ans_report_lines
+    global stage_results_report
     try:
         sheet = connect_spreadsheet("シート1")
         all_records = sheet.get_all_values()
         cell_list = []
-        ans_report_lines.append("【本日確定の判定結果】")
+        
+        # スプレッドシート上の「ステージ名」から内部キー（stage_key）に逆引きするためのマップ
+        reverse_stage_map = {
+            "7. 長トレンド": "trend_align",
+            "8. 上ヒゲ": "upper_shadow",
+            "9. 天井圏回避": "ceiling_avoid",
+            "10. 新高値": "new_high_pass",
+            "11. 週足60": "weekly_ma_pass",
+            "12. 天井圏維持": "monthly_high_pass" # completed_passもここに含む
+        }
+
         for i, row in enumerate(all_records):
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
             code, row_date_str = row[1], row[0]
+            stage_name = row[2] # C列のステージ名
             try: 
                 selected_price = int(row[4])
                 sel_date = datetime.datetime.strptime(row_date_str, "%Y-%m-%d").date()
@@ -87,8 +118,16 @@ def update_yesterday_results():
                 pct = ((next_close - selected_price) / selected_price) * 100
                 mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
                 cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
-                ans_report_lines.append(f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)")
-        if len(ans_report_lines) == 1: ans_report_lines.append("  該当なし")
+                
+                # 該当するステージに結果文字列を振り分け
+                s_key = reverse_stage_map.get(stage_name, "completed_pass")
+                # もし「12. 天井圏維持」で、かつ完全合格一覧の履歴データ等と紐づけたい場合の微調整ロジック（簡易版）
+                if stage_name == "12. 天井圏維持" and row[3] == "通常": # 状況に応じてcompleted_passと分ける場合はここで判定可能
+                    s_key = "monthly_high_pass"
+                
+                result_line = f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
+                stage_results_report[s_key].append(result_line)
+                
         if cell_list: sheet.update_cells(cell_list)
     except Exception as e: print(f"Sheet1判定エラー: {e}")
 
@@ -203,7 +242,67 @@ def main():
     
     final_list = [f"  {'★PPP ' in s['ppp_label'] and s['ppp_label'] or ''}■ {code} | {s['price']}円 ({s['date'][5:]})" for code, s in sorted(selected_stocks.items())]
     header = f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}"
-    body = "\n".join(ans_report_lines) + f"\n\n==================================================\n{header}\n総対象: {end_r-start_r}件\n\n【各ステージ生存数】\n1.取得: {stage_survivors['stage1']} | 2.月足60: {stage_survivors['stage2']} | 3.出来高: {stage_survivors['stage3']} | 4.下半身: {stage_survivors['stage4']} | 5.溜め: {stage_survivors['stage5']} | 6.右肩: {stage_survivors['stage6']} | 7.長期T: {stage_survivors['stage7']} | 8.上ヒゲ: {stage_survivors['stage8']} | 9.天井回避: {stage_survivors['stage9']} | 10.新高値: {stage_survivors['stage10']} | 11.週足60: {stage_survivors['stage11']} | 12.天井維持: {len(final_list)}\n\n★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n" + "\n".join(final_list)
+    
+    # 2点目: 生存数の改行ブロックを作成
+    survivors_block = (
+        "【各ステージ生存数】\n"
+        f"1.取得: {stage_survivors['stage1']}\n"
+        f"2.月足60: {stage_survivors['stage2']}\n"
+        f"3.出来高: {stage_survivors['stage3']}\n"
+        f"4.下半身: {stage_survivors['stage4']}\n"
+        f"5.溜め: {stage_survivors['stage5']}\n"
+        f"6.右肩: {stage_survivors['stage6']}\n"
+        f"7.長期T: {stage_survivors['stage7']}\n"
+        f"8.上ヒゲ: {stage_survivors['stage8']}\n"
+        f"9.天井回避: {stage_survivors['stage9']}\n"
+        f"10.新高値: {stage_survivors['stage10']}\n"
+        f"11.週足60: {stage_survivors['stage11']}\n"
+        f"12.天井維持: {len(final_list)}"
+    )
+    
+    # 1点目: 判定結果を生存数ごとに割り振ったブロックを動的に構築
+    judgement_lines = ["【本日確定の判定結果】"]
+    has_any_result = False
+    
+    # 各ステージ生存数に合わせた割り振り用の集計マップを作成
+    # (stage_survivors の数値を表示名にマッピング)
+    stage_count_map = {
+        "trend_align": stage_survivors['stage2'],
+        "upper_shadow": stage_survivors['stage8'],
+        "ceiling_avoid": stage_survivors['stage9'],
+        "new_high_pass": stage_survivors['stage10'],
+        "weekly_ma_pass": stage_survivors['stage11'],
+        "monthly_high_pass": len(final_list),
+        "completed_pass": len(final_list)
+    }
+
+    for key, lines in stage_results_report.items():
+        if lines:
+            has_any_result = True
+            # 例「2.月足60: 2345」のようなヘッダーを付与
+            label = STAGE_LABELS.get(key, "不明なステージ")
+            count = stage_count_map.get(key, 0)
+            judgement_lines.append(f"{label}: {count}")
+            judgement_lines.extend(lines)
+            judgement_lines.append("") # 可読性のための空行
+            
+    if not has_any_result:
+        judgement_lines.append("  該当なし")
+        
+    judgement_block = "\n".join(judgement_lines).strip()
+
+    # 全体の本文組み立て (判定を最後に配置)
+    body = (
+        f"==================================================\n"
+        f"{header}\n"
+        f"総対象: {end_r-start_r}件\n\n"
+        f"{survivors_block}\n\n"
+        f"★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n"
+        f"【完全合格一覧】\n"
+        f"{"\n".join(final_list) if final_list else '  該当なし'}\n\n"
+        f"==================================================\n"
+        f"{judgement_block}"
+    )
     
     msg = MIMEMultipart()
     msg['From'], msg['To'], msg['Subject'] = SENDER_EMAIL, SENDER_EMAIL, f"📊 adoGEM レポート {len(final_list)}件"
