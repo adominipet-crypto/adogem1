@@ -2,9 +2,9 @@ name: adoGEM Full Scan Continuous
 
 on:
   schedule:
-    # 🌟 日本時間の毎週火曜日〜土曜日の「午前 5:00」（UTC 前日20:00）に起動
+    # 🌟 日本時間の毎週火曜日〜土曜日の「午前 4:00」（UTC 前日19:00）に起動
     # （月〜金の相場結果を、翌朝5時に判定するため、火〜土の朝に動かします）
-    - cron: '0 20 * * 2-6'
+    - cron: '0 19 * * 2-6'
   workflow_dispatch: # 手動実行ボタン
 
 jobs:
