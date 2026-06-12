@@ -20,23 +20,13 @@ sheet1_final_log = {}
 selected_stocks = {}
 GLOBAL_LATEST_DATE = None  
 stage_results_report = {
-    "trend_align": [],
-    "upper_shadow": [],
-    "ceiling_avoid": [],
-    "new_high_pass": [],
-    "weekly_ma_pass": [],
-    "monthly_high_pass": [],
-    "completed_pass": []
+    "trend_align": [], "upper_shadow": [], "ceiling_avoid": [],
+    "new_high_pass": [], "weekly_ma_pass": [], "monthly_high_pass": [], "completed_pass": []
 }
 
 STAGE_LABELS = {
-    "trend_align": "2.月足60",
-    "upper_shadow": "8.上ヒゲ",
-    "ceiling_avoid": "9.天井回避",
-    "new_high_pass": "10.新高値",
-    "weekly_ma_pass": "11.週足60",
-    "monthly_high_pass": "12.天井維持",
-    "completed_pass": "完全合格"
+    "trend_align": "2.月足60", "upper_shadow": "8.上ヒゲ", "ceiling_avoid": "9.天井回避",
+    "new_high_pass": "10.新高値", "weekly_ma_pass": "11.週足60", "monthly_high_pass": "12.天井維持", "completed_pass": "完全合格"
 }
 
 # --- 共通関数 ---
@@ -89,14 +79,7 @@ def update_yesterday_results():
         sheet = connect_spreadsheet("シート1")
         all_records = sheet.get_all_values()
         cell_list = []
-        reverse_stage_map = {
-            "7. 長トレンド": "trend_align",
-            "8. 上ヒゲ": "upper_shadow",
-            "9. 天井圏回避": "ceiling_avoid",
-            "10. 新高値": "new_high_pass",
-            "11. 週足60": "weekly_ma_pass",
-            "12. 天井圏維持": "monthly_high_pass"
-        }
+        reverse_stage_map = {"7. 長トレンド": "trend_align", "8. 上ヒゲ": "upper_shadow", "9. 天井圏回避": "ceiling_avoid", "10. 新高値": "new_high_pass", "11. 週足60": "weekly_ma_pass", "12. 天井圏維持": "monthly_high_pass"}
         for i, row in enumerate(all_records):
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
             code, row_date_str = row[1], row[0]
@@ -112,7 +95,6 @@ def update_yesterday_results():
                 mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
                 cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
                 s_key = reverse_stage_map.get(stage_name, "completed_pass")
-                if stage_name == "12. 天井圏維持" and row[3] == "通常": s_key = "monthly_high_pass"
                 result_line = f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
                 stage_results_report[s_key].append(result_line)
         if cell_list: sheet.update_cells(cell_list)
@@ -158,7 +140,6 @@ def analyze_stock(symbol):
     stage_survivors["stage2"] += 1
     if df['Volume'].iloc[-1] < 50000: return "SKIP"
     stage_survivors["stage3"] += 1
-    data_date = df.index[-1].strftime("%Y-%m-%d")
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
     df['MA60'] = df['Close'].rolling(60).mean()
@@ -169,7 +150,15 @@ def analyze_stock(symbol):
     stage_survivors["stage4"] += 1
     if today['MA60'] <= yest['MA60']: return "SKIP"
     stage_survivors["stage5"] += 1
+    
+    # 6. 右肩上がり（MA60以下を削除＝MA60が上昇していないものを除外）
+    if today['MA60'] <= yest['MA60']: return "SKIP"
+    stage_survivors["stage6"] += 1
+
     ppp_label = "★PPP " if (today['MA5'] > today['MA20'] > today['MA60'] > today['MA100'] > (today['MA300'] if pd.notna(today['MA300']) else 0)) else ("★PPP(Short) " if (today['MA5'] > today['MA20'] > today['MA60'] > today['MA100']) else "")
+    data_date = df.index[-1].strftime("%Y-%m-%d")
+
+    # 判定フロー
     if today['MA100'] <= yest['MA100']: 
         sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
@@ -193,6 +182,7 @@ def analyze_stock(symbol):
     if today['Close'] < (monthly_close.rolling(24).mean().iloc[-1] * 0.80):
         sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "monthly_high_pass", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
+
     sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "completed_pass", "ppp_label": ppp_label, "date": data_date}
     selected_stocks[symbol] = {"price": int(today['Close']), "ppp_label": ppp_label, "date": data_date}
     if "★PPP " in ppp_label: stats["★PPP"] += 1
@@ -215,62 +205,40 @@ def main():
     
     final_list = [f"  {'★PPP ' in s['ppp_label'] and s['ppp_label'] or ''}■ {code} | {s['price']}円 ({s['date'][5:]})" for code, s in sorted(selected_stocks.items())]
     header = f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}"
-    
     survivors_block = (
         "【各ステージ生存数】\n"
-        f"1.取得: {stage_survivors['stage1']}\n"
-        f"2.月足60: {stage_survivors['stage2']}\n"
-        f"3.出来高: {stage_survivors['stage3']}\n"
-        f"4.下半身: {stage_survivors['stage4']}\n"
-        f"5.溜め: {stage_survivors['stage5']}\n"
-        f"6.右肩: {stage_survivors['stage6']}\n"
-        f"7.長期T: {stage_survivors['stage7']}\n"
-        f"8.上ヒゲ: {stage_survivors['stage8']}\n"
-        f"9.天井回避: {stage_survivors['stage9']}\n"
-        f"10.新高値: {stage_survivors['stage10']}\n"
-        f"11.週足60: {stage_survivors['stage11']}\n"
-        f"12.天井維持: {len(final_list)}"
+        f"1.取得: {stage_survivors['stage1']}\n2.月足60: {stage_survivors['stage2']}\n"
+        f"3.出来高: {stage_survivors['stage3']}\n4.下半身: {stage_survivors['stage4']}\n"
+        f"5.溜め: {stage_survivors['stage5']}\n6.右肩: {stage_survivors['stage6']}\n"
+        f"7.長期T: {stage_survivors['stage7']}\n8.上ヒゲ: {stage_survivors['stage8']}\n"
+        f"9.天井回避: {stage_survivors['stage9']}\n10.新高値: {stage_survivors['stage10']}\n"
+        f"11.週足60: {stage_survivors['stage11']}\n12.天井維持: {len(final_list)}"
     )
     
     judgement_lines = ["【本日確定の判定結果】"]
     has_any_result = False
-    stage_count_map = {
-        "trend_align": stage_survivors['stage2'],
-        "upper_shadow": stage_survivors['stage8'],
-        "ceiling_avoid": stage_survivors['stage9'],
-        "new_high_pass": stage_survivors['stage10'],
-        "weekly_ma_pass": stage_survivors['stage11'],
-        "monthly_high_pass": len(final_list),
-        "completed_pass": len(final_list)
-    }
-
     for key, lines in stage_results_report.items():
         if lines:
             has_any_result = True
-            label = STAGE_LABELS.get(key, "不明なステージ")
-            count = stage_count_map.get(key, 0)
-            judgement_lines.append(f"{label}: {count}")
+            judgement_lines.append(f"{STAGE_LABELS.get(key, '不明')}: {len(lines)}")
             judgement_lines.extend(lines)
             judgement_lines.append("")
-            
-    if not has_any_result:
-        judgement_lines.append("  該当なし")
-        
+    if not has_any_result: judgement_lines.append("  該当なし")
     judgement_block = "\n".join(judgement_lines).strip()
-    
     final_list_str = "\n".join(final_list) if final_list else '  該当なし'
-
-    body = (
-        f"==================================================\n"
-        f"{header}\n"
-        f"総対象: {end_r-start_r}件\n\n"
-        f"{survivors_block}\n\n"
-        f"★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n"
-        f"【完全合格一覧】\n"
-        f"{final_list_str}\n\n"
-        f"==================================================\n"
-        f"{judgement_block}"
+    
+    footer = (
+        "\n--------------------------------------------------\n"
+        "【条件一覧】\n1. 全データ取得成功\n2. 月足MA60クリア\n3. 出来高5万株クリア\n4. 下半身クリア\n"
+        "5. 溜めMA5クリア（MA5以上削除）\n6. 右肩上がり（MA60以下削除）\n7. 長期トレンド（MA100が前日より上昇）\n"
+        "8. 上ヒゲクリア（上ヒゲが実態の1.5以上削除）\n9. 天井圏MA100回避（MA100の3％以内削除）\n"
+        "10. 新高値MA5更新\n11. 週足MA60クリア\n12. 天井圏維持（月足MA24の20%以上削除）\n"
+        "--------------------------------------------------\n"
+        "【判定結果マーク基準】翌日終値\n ◎ ： +2.0%以上\n ◯ ： +0.1%〜+2.0%\n ▲ ： -0.1%〜+0.1%\n ✕ ： -0.1%未満\n"
+        "--------------------------------------------------"
     )
+    
+    body = f"==================================================\n{header}\n総対象: {end_r-start_r}件\n\n{survivors_block}\n\n★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str}\n\n==================================================\n{judgement_block}{footer}"
     
     msg = MIMEMultipart()
     msg['From'], msg['To'], msg['Subject'] = SENDER_EMAIL, SENDER_EMAIL, f"📊 adoGEM レポート {len(final_list)}件"
