@@ -18,7 +18,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas yfinance
+        # Excelファイルを確実に読み込むための openpyxl を追加しました
+        pip install pandas yfinance openpyxl
 
     - name: Run download script
       run: python download_10y_csv.py
