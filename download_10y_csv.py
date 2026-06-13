@@ -12,8 +12,7 @@ from googleapiclient.http import MediaIoBaseUpload
 # --- 環境設定 ---
 # 既存のシークレットをそのまま使用します
 GCP_SA_KEY = os.environ.get('GCP_SA_KEY')
-DRIVE_FOLDER_ID = os.environ.get('DRIVE_FOLDER_ID')
-
+DRIVE_FOLDER_ID = 'folders/1xdomdWgW1JdJZK2immYokfFl4LfTdIBk'
 # --- Drive API 認証 ---
 def authenticate_drive():
     scopes = ['https://www.googleapis.com/auth/drive']
