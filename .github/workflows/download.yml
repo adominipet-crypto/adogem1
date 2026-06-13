@@ -23,6 +23,8 @@ jobs:
 
     - name: Run download script
       env:
-        GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        CLIENT_ID: ${{ secrets.CLIENT_ID }}
+        CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+        REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
         DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
       run: python download_10y_csv.py
