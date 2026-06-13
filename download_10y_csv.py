@@ -1,28 +1,57 @@
+import os
+import sys
+import time
+import requests
+import io
+import pandas as pd
+from datetime import datetime
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+
+# 出力を即時反映する設定（これがないとログが消えることがあります）
+sys.stdout.reconfigure(line_buffering=True)
+
+CLIENT_ID = os.environ.get('CLIENT_ID')
+CLIENT_SECRET = os.environ.get('CLIENT_SECRET')
+REFRESH_TOKEN = os.environ.get('REFRESH_TOKEN')
+DRIVE_FOLDER_ID = os.environ.get('DRIVE_FOLDER_ID')
+
+def authenticate_drive():
+    creds = Credentials(
+        None,
+        refresh_token=REFRESH_TOKEN,
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token"
+    )
+    return build('drive', 'v3', credentials=creds)
+
+# 動作確認のため、fetchとuploadを簡略化しました
 def main():
     print("--- プログラム開始 ---")
     if not all([CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN, DRIVE_FOLDER_ID]):
-        print("エラー: 環境変数が不足しています")
+        print("エラー: 設定値が読み込めていません")
         return
 
-    print(f"保存先フォルダID: {DRIVE_FOLDER_ID}")
+    print(f"フォルダID: {DRIVE_FOLDER_ID}")
     try:
-        drive_service = authenticate_drive()
-        print("認証成功")
+        service = authenticate_drive()
+        print("認証成功。テストとして1301をダウンロードします...")
         
-        # 1300から1310までループを回す
-        for code in range(1300, 1311):
-            print(f"銘柄コード {code} を処理中...")
-            df = fetch_10y_data(str(code))
+        # 1301のデータ取得テスト
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/1301.T?range=1mo&interval=1d"
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        print(f"HTTPステータス: {res.status_code}")
+        
+        if res.status_code == 200:
+            print("データ取得成功！")
+        else:
+            print("データ取得失敗")
             
-            if df is not None:
-                print(f"データ取得成功: {len(df)}行")
-                upload_csv_to_drive(drive_service, df, str(code))
-                print(f"アップロード完了: {code}.csv")
-            else:
-                print(f"[{code}] データ取得失敗（またはデータなし）")
-            
-            time.sleep(1.5)
-            
-        print("--- 全処理完了 ---")
+        print("--- 終了 ---")
     except Exception as e:
-        print(f"致命的なエラーが発生しました: {e}")
+        print(f"致命的なエラー: {e}")
+
+if __name__ == "__main__":
+    main()
