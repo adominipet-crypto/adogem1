@@ -1,39 +1,39 @@
-import pandas as pd
 import yfinance as yf
 import time
 import os
+import re
 
 def main():
     filename = 'all_stocks.xls'
     
-    # 文字コードを指定せず、pandasの自動判別に任せる設定
-    # もしそれでもダメなら、最も汎用的な 'utf-16' を試す構成
-    try:
-        # まずは自動判別で試す
-        df_list = pd.read_csv(filename, sep=None, engine='python', encoding_errors='ignore')
-    except Exception:
-        # ダメなら UTF-16 を試す（ExcelがCSV出力するときによくある形式）
-        df_list = pd.read_csv(filename, encoding='utf-16', sep='\t', on_bad_lines='skip')
+    # バイナリモード（'rb'）で読み込み、NUL文字やゴミを無視して直接解析する
+    codes = []
+    print("ファイルから銘柄コードを直接抽出中...")
     
-    # 念のためカラム名を表示して確認（ログで確認できます）
-    print("カラム一覧:", df_list.columns.tolist())
+    with open(filename, 'rb') as f:
+        content = f.read().decode('utf-8', errors='ignore')
+        
+    # 「日付,コード,銘柄名...」の並びから、コード部分（4桁の数字など）を正規表現で抽出
+    # 20260531.0,1301.0,極洋... のような形式から 1301 を抜き出します
+    # パターン: カンマの直後にある4桁以上の数字
+    found_codes = re.findall(r',(\d{3,4})[.0]*,', content)
     
-    # 'コード'列が見つからない場合の対策
-    col_name = 'コード' if 'コード' in df_list.columns else df_list.columns[1]
-    
-    codes = df_list[col_name].dropna().astype(str).tolist()
+    # 重複を除去しつつリスト化（最初の行の日付などは除外）
+    codes = sorted(list(set(found_codes)))
+    print(f"抽出したコード数: {len(codes)}")
     
     os.makedirs("output", exist_ok=True)
     
     for code in codes:
-        clean_code = code.replace('.0', '').strip()
-        ticker = f"{clean_code}.T"
-            
+        # 1301 などに .T を付与
+        ticker = f"{code}.T"
+        
         print(f"取得中: {ticker}")
         try:
             df = yf.download(ticker, period="10y")
             if not df.empty:
-                df.to_csv(f"output/{clean_code}.csv")
+                df.to_csv(f"output/{code}.csv")
+                print(f"保存完了: {code}.csv")
         except Exception as e:
             print(f"エラー発生 {ticker}: {e}")
         
