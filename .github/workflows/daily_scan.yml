@@ -4,7 +4,7 @@ on:
   schedule:
     # 日本時間の火・水・木・金・土の朝 4:40 に実行 (UTC：月〜金の19:40)
     - cron: '40 19 * * 1-5'
-  workflow_dispatch: # 手動実行ボタンを残します
+  workflow_dispatch: # 手動 実行ボタンを残します
 
 jobs:
   run-analysis:
