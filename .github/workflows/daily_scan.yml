@@ -1,31 +1,11 @@
-name: Stock Analysis Automator
+# adogem1.py の一番上の行にこれを追記
+import sys
+import traceback
 
-on:
-  schedule:
-    - cron: '30 21 * * *'
-  workflow_dispatch:
+def exception_handler(type, value, tb):
+    print("★致命的なエラーが発生しました！")
+    traceback.print_exception(type, value, tb)
 
-jobs:
-  run-analysis:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+sys.excepthook = exception_handler
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install dependencies
-        run: pip install pandas gspread google-auth requests yfinance openpyxl
-
-      - name: Run Analysis Script
-        run: python adogem1.py 4000 4500
-        env:
-          # すべてのSecretsをここに集約します
-          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+# (これより下に、これまでのプログラムを記述)
