@@ -2,7 +2,9 @@ name: adoGEM Full Scan Continuous
 
 on:
   schedule:
-    - cron: '40 19 * * 2-6' # 火〜土の朝4:40（日本時間）に実行
+    # 🌟 日本時間の毎週火曜日〜土曜日の「午前 4:40」（UTC 前日19:40）に起動
+    # （月〜金の相場結果を、翌朝5時に判定するため、火〜土の朝に動かします）
+    - cron: '40 19 * * 2-6'
   workflow_dispatch: # 手動実行ボタン
 
 jobs:
@@ -20,14 +22,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas gspread google-auth lxml html5lib requests yfinance openpyxl
+          pip install pandas gspread google-auth lxml html5lib requests
 
-      - name: Run CSV Download & Analysis
+      - name: Run Full Scan & Error Watch
         env:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
         run: |
-          python download_10y_csv.py
           python adogem1.py 1300 10001
