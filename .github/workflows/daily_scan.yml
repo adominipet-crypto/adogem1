@@ -1,17 +1,18 @@
-name: adoGEM Full Scan Continuous
+name: Stock Analysis Automator
 
 on:
-  push:
+  schedule:
+    - cron: '30 21 * * *'
   workflow_dispatch:
 
 jobs:
-  scan-and-report:
+  run-analysis:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -19,9 +20,12 @@ jobs:
       - name: Install dependencies
         run: pip install pandas gspread google-auth requests yfinance openpyxl
 
-      - name: Run script
+      - name: Run Analysis Script
+        run: python adogem1.py 4000 4500
         env:
+          # すべてのSecretsをここに集約します
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-        run: python adogem1.py 4000 4500
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
