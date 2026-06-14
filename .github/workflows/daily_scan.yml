@@ -1,32 +1,33 @@
-name: Stock Analysis Automator
+name: adoGEM Full Scan Continuous
 
 on:
   schedule:
-    # 日本時間の火・水・木・金・土の朝 4:40 に実行 (UTC：月〜金の19:40)
-    - cron: '40 19 * * 1-5'
-  workflow_dispatch: # 手動 実行ボタンを残します
+    - cron: '40 19 * * 2-6' # 火〜土の朝4:40（日本時間）に実行
+  workflow_dispatch: # 手動実行ボタン
 
 jobs:
-  run-analysis:
+  scan-and-report:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install pandas gspread google-auth google-auth-oauthlib requests yfinance openpyxl
+          python -m pip install --upgrade pip
+          pip install pandas gspread google-auth lxml html5lib requests yfinance openpyxl
 
-      - name: Run Analysis Script
+      - name: Run CSV Download & Analysis
         env:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-        run: python adogem1.py
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+        run: |
+          python download_10y_csv.py
+          python adogem1.py 1300 10001
