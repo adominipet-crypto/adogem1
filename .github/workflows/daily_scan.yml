@@ -29,5 +29,4 @@ jobs:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
         run: |
-          python download_10y_csv.py
-          python adogem1.py 1300 10001
+          python adogem1.py 4000 4500
