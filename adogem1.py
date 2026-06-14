@@ -1,39 +1,29 @@
-import sys
-import traceback
-import os
-# ... (その他import) ...
-
-# 1. 起動デバッグ（最上部）
-print(f"★[DEBUG] 起動しました。カレントディレクトリ: {os.getcwd()}")
-
-# 2. 関数定義をすべてここに集める（mainより上にする！）
-def fetch_global_latest_date():
-    # ここに中身を記述
-    print("★fetch_global_latest_dateを実行")
-
-def update_yesterday_results():
-    # ここに中身を記述
-    print("★update_yesterday_resultsを実行")
-
-def update_sheet2_results():
-    # ここに中身を記述
-    print("★update_sheet2_resultsを実行")
-
-def analyze_stock(s):
-    # ここに中身を記述
-    print(f"★analyze_stock: {s}")
-
-def record_to_spreadsheet():
-    # ここに中身を記述
-    print("★record_to_spreadsheetを実行")
-
-# 3. main関数を一番下に置く
 def main():
     print("★main()関数の中に入りました！")
-    # ... (前回のmainコード)
-    fetch_global_latest_date() # ここで正しく認識されるようになる
-    # ...
-
-# 4. 最後に起動処理
-if __name__ == "__main__":
-    main()
+    
+    # 範囲を 4000〜4500 に固定
+    start_r = 4000
+    end_r = 4501
+    
+    try:
+        print("★[1] fetch_global_latest_date 実行前")
+        fetch_global_latest_date()
+        
+        print("★[2] update_yesterday_results 実行前")
+        update_yesterday_results()
+        
+        print("★[3] update_sheet2_results 実行前")
+        update_sheet2_results()
+        
+        print("★[4] スキャンループ開始")
+        for s in [str(i) for i in range(start_r, end_r)]: 
+            print(f"★スキャン中: {s}")
+            analyze_stock(s)
+            
+        print("★[5] スプレッドシート記録へ")
+        record_to_spreadsheet()
+        print("★すべての処理が完了しました")
+        
+    except Exception as e:
+        print(f"★エラー発生: {e}")
+        traceback.print_exc()
