@@ -9,8 +9,7 @@ import os, time, sys, datetime, gspread, json, requests
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError
 
-# --- 環境設定（GitHub Secretsから読み込む前提） ---
-# 以下の環境変数はGitHub ActionsのSecretsで設定してください
+# --- 環境設定 ---
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 GCP_SA_KEY = os.environ.get('GCP_SA_KEY')
@@ -72,7 +71,7 @@ def get_next_trading_day_data(symbol, base_date):
         return future_df.iloc[0] if not future_df.empty else None
     except: return None
 
-# --- シート1・シート2更新ロジック ---
+# --- 更新ロジック ---
 def update_yesterday_results():
     global stage_results_report
     try:
@@ -130,7 +129,7 @@ def update_sheet2_results():
         if cell_list: sheet2.update_cells(cell_list, value_input_option='RAW')
     except Exception as e: print(f"Sheet2更新エラー: {e}")
 
-# --- スキャン・フィルタリング判定処理 ---
+# --- スキャン判定ロジック ---
 def analyze_stock(symbol):
     df = get_stock_data_fallback(symbol, force_check_date=True)
     if df is None: return "SKIP"
@@ -150,6 +149,7 @@ def analyze_stock(symbol):
     stage_survivors["stage4"] += 1
     if today['MA60'] <= yest['MA60']: return "SKIP"
     stage_survivors["stage5"] += 1
+    
     # 6. 右肩上がり
     if today['MA60'] <= yest['MA60']: return "SKIP"
     stage_survivors["stage6"] += 1
@@ -157,6 +157,52 @@ def analyze_stock(symbol):
     ppp_label = "★PPP " if (today['MA5'] > today['MA20'] > today['MA60'] > today['MA100'] > (today['MA300'] if pd.notna(today['MA300']) else 0)) else ("★PPP(Short) " if (today['MA5'] > today['MA20'] > today['MA60'] > today['MA100']) else "")
     data_date = df.index[-1].strftime("%Y-%m-%d")
 
-    # 判定フロー（フィルタリング）
+    # 判定フロー
     if today['MA100'] <= yest['MA100']: 
-        sheet1_final_log[symbol] = {"price": int(
+        sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    stage_survivors["stage7"] += 1
+    if (today['High'] - today['Close']) >= ((today['Close'] - today['Open']) * 1.5):
+        sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "upper_shadow", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    stage_survivors["stage8"] += 1
+    if today['MA100'] <= today['Close'] <= (today['MA100'] * 1.03):
+        sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "ceiling_avoid", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    stage_survivors["stage9"] += 1
+    if today['Close'] <= df['High'].iloc[-6:-1].max():
+        sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "new_high_pass", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    stage_survivors["stage10"] += 1
+    if df['Close'].resample('W').last().rolling(60).mean().iloc[-1] > df['Close'].resample('W').last().iloc[-1]:
+        sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "weekly_ma_pass", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    stage_survivors["stage11"] += 1
+    if today['Close'] < (monthly_close.rolling(24).mean().iloc[-1] * 0.80):
+        sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "monthly_high_pass", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+
+    sheet1_final_log[symbol] = {"price": int(today['Close']), "stage_key": "completed_pass", "ppp_label": ppp_label, "date": data_date}
+    selected_stocks[symbol] = {"price": int(today['Close']), "ppp_label": ppp_label, "date": data_date}
+    if "★PPP " in ppp_label: stats["★PPP"] += 1
+    elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
+    else: stats["normal_detect"] += 1
+    return "OK"
+
+def record_to_spreadsheet():
+    sheet = connect_spreadsheet("シート1")
+    new_rows = [[r["date"], code, {"trend_align":"7. 長トレンド","upper_shadow":"8. 上ヒゲ","ceiling_avoid":"9. 天井圏回避","new_high_pass":"10. 新高値","weekly_ma_pass":"11. 週足60","monthly_high_pass":"12. 天井圏維持","completed_pass":"12. 天井圏維持"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in ["trend_align", "upper_shadow", "ceiling_avoid", "new_high_pass", "weekly_ma_pass", "monthly_high_pass", "completed_pass"]]
+    if new_rows: sheet.append_rows(new_rows, value_input_option='RAW')
+
+def main():
+    fetch_global_latest_date()
+    update_yesterday_results()
+    update_sheet2_results()
+    start_r, end_r = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
+    for s in [str(i) for i in range(start_r, end_r)]: analyze_stock(s)
+    record_to_spreadsheet()
+    
+    # --- レポート送信 ---
+    # （※ここに前述のメール送信ロジックが入ります）
+
+if __name__ == "__main__": main()
