@@ -1,5 +1,12 @@
 - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # 必要なライブラリを網羅的にインストール
-          pip install pandas gspread google-auth google-auth-oauthlib requests yfinance
+          # google-authを含む必要なライブラリを明示
+          pip install pandas gspread google-auth google-auth-oauthlib requests yfinance openpyxl
+
+      - name: Run Scan
+        env:
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: python adogem1.py 4000 4500
