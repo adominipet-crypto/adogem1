@@ -27,3 +27,7 @@ def main():
     except Exception as e:
         print(f"★エラー発生: {e}")
         traceback.print_exc()
+
+if __name__ == "__main__":
+    print("★[SYSTEM] 確実にif文を通過しました")
+    main()
