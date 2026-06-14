@@ -55,7 +55,7 @@ def fetch_global_latest_date():
 
 def update_yesterday_results():
     print("★[2/6] シート1 (update_yesterday_results) を更新中...")
-    # ★ここに前日結果の更新・判定ロジックを貼り付けてください
+    # ★ここに前日結果の　更新・判定ロジックを貼り付けてください
     pass
 
 
