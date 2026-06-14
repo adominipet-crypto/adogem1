@@ -2,8 +2,9 @@ name: Stock Analysis Automator
 
 on:
   schedule:
-    - cron: '30 21 * * *'
-  workflow_dispatch:
+    # 日本時間の火・水・木・金・土の朝 4:40 に実行 (UTC：月〜金の19:40)
+    - cron: '40 19 * * 1-5'
+  workflow_dispatch: # 手動実行ボタンを残します
 
 jobs:
   run-analysis:
@@ -28,8 +29,4 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-        run: |
-          echo "★スクリプト実行を開始します"
-          python adogem1.py 4000 4500
-          echo "★スクリプト実行が完了しました"
+        run: python adogem1.py
