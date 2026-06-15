@@ -1,17 +1,15 @@
 import os
 import sys
 import glob
-import time
 import datetime
 import smtplib
 import pandas as pd
+from tqdm import tqdm  # notebookではなく通常のtqdmに変更
 from email.mime.text import MIMEText
-from tqdm.notebook import tqdm
-from google.colab import drive, userdata
 
-# 設定
-# Google Driveを使用する場合はマウント、GitHub Actionsの場合は環境変数からパスを取得
-CSV_FOLDER = '/content/drive/MyDrive/nikkei/data_full' # 環境に合わせて変更してください
+# --- 設定 ---
+# GitHub Actions上のパス（リポジトリ内に data_full フォルダがあると仮定）
+CSV_FOLDER = './data_full' 
 TARGET_DATE = datetime.datetime.now().strftime("%Y-%m-%d")
 
 # 柔軟な列取得関数
@@ -31,15 +29,17 @@ def get_mark(pct):
 # メール送信関数
 def send_email(report_text):
     try:
-        # GitHub ActionsのSecretまたはColabのuserdataから取得
-        # ※GitHub Actionsの場合はos.environ.get('GMAIL_USER')等に変更してください
-        sender = os.environ.get('EMAIL_ADDRESS') or userdata.get('GMAIL_USER')
-        password = os.environ.get('EMAIL_PASSWORD') or userdata.get('GMAIL_APP_PASS')
+        sender = os.environ.get('EMAIL_ADDRESS')
+        password = os.environ.get('EMAIL_PASSWORD')
         
+        if not sender or not password:
+            print("[システム] メール用環境変数が設定されていません。")
+            return
+
         msg = MIMEText(report_text)
         msg['Subject'] = f"【検証レポート】{TARGET_DATE}"
         msg['From'] = sender
-        msg['To'] = sender
+        msg['To'] = sender 
 
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(sender, password)
@@ -49,7 +49,10 @@ def send_email(report_text):
         print(f"\n[システム] メール送信失敗: {e}")
 
 def run_analysis():
-    # CSV取得
+    # 引数から銘柄範囲を取得 (デフォルト: 1300-10001)
+    start_r = int(sys.argv[1]) if len(sys.argv) > 1 else 1300
+    end_r = int(sys.argv[2]) if len(sys.argv) > 2 else 10001
+
     files = glob.glob(os.path.join(CSV_FOLDER, "*.csv"))
     pass_counts = {i: 0 for i in range(1, 13)}
     qualified_details = []
@@ -58,8 +61,12 @@ def run_analysis():
 
     print(f"--- {TARGET_DATE} の検証を開始 ---\n")
 
+    # 銘柄番号による絞り込みが必要な場合はここで調整
     for file_path in tqdm(files, desc="検証中"):
         try:
+            # ファイル名からコードを抽出して範囲チェックを行う場合はここでフィルタ
+            # (例: code = os.path.basename(file_path).split('.')[0])
+            
             df = pd.read_csv(file_path, header=[0, 1], index_col=0)
             df.index = pd.to_datetime(df.index).normalize()
 
@@ -111,7 +118,6 @@ def run_analysis():
 
             if (c / ma24_m.iloc[idx] <= 1.2):
                 pass_counts[12] += 1
-                # 翌営業日判定ロジック
                 if idx + 1 < len(c_series):
                     future_c = c_series.iloc[idx + 1]
                     pct = ((future_c - c) / c) * 100
@@ -122,7 +128,7 @@ def run_analysis():
 
         except Exception: continue
 
-    # レポート作成
+    # レポート組み立て
     report = f"--- {TARGET_DATE} 検証結果 ---\n\n【各ステージ生存数】\n"
     stages = ["取得", "月足60", "出来高", "下半身", "溜め", "右肩", "長期T", "上ヒゲ", "天井回避", "新高値", "週足60", "天井維持"]
     for i in range(1, 13):
@@ -138,5 +144,4 @@ def run_analysis():
     send_email(report)
 
 if __name__ == "__main__":
-    # GitHub Actionsで引数を渡す場合は sys.argv を使用可能
     run_analysis()
