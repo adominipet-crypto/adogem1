@@ -2,7 +2,7 @@ name: adoGEM Full Scan Continuous
 
 on:
   schedule:
-    # 毎週火曜日〜土曜日の「午前 4:40」（UTC 前日19:40）に起動
+    # 日本時間 毎週火〜土の 4:40 AM (UTC 19:40)
     - cron: '40 19 * * 2-6'
   workflow_dispatch: # 手動実行ボタン
 
@@ -21,14 +21,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # 必要なライブラリを全て網羅
-          pip install pandas gspread google-auth lxml html5lib requests tqdm
+          # API取得とスプレッドシート更新に必要なライブラリ
+          pip install pandas gspread google-auth requests tqdm
 
-      - name: Run Full Scan & Email Report
+      - name: Run Full Scan
         env:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
         run: |
+          # 1300番から10001番までスキャン開始
           python adogem1.py 1300 10001
