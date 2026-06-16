@@ -29,7 +29,8 @@ def get_stock_data_from_web(symbol):
             "Volume": quotes.get("volume", [])
         }, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
         return df.dropna().sort_index()
-    except: return None
+    except:
+        return None
 
 # --- 判定ロジック ---
 def analyze_stock(code, df):
@@ -83,3 +84,24 @@ def send_email(report_text):
     msg['From'] = SENDER_EMAIL
     msg['To'] = SENDER_EMAIL
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.sendmail(SENDER_EMAIL, SENDER_EMAIL, msg.as_string())
+
+# --- メイン処理 ---
+def main():
+    start_r = int(sys.argv[1]) if len(sys.argv) > 1 else 1300
+    end_r = int(sys.argv[2]) if len(sys.argv) > 2 else 10001
+    
+    for code in range(start_r, end_r):
+        if 1300 <= code <= 1600: continue
+        df = get_stock_data_from_web(str(code))
+        if df is not None: analyze_stock(str(code), df)
+
+    # --- レポート生成 ---
+    report = f"--- {datetime.date.today()} 検証結果 ---\n\n【各ステージ生存数】\n"
+    stages = ["取得", "月足60", "出来高", "下半身", "溜め", "右肩", "長期T", "上ヒゲ", "天井回避", "新高値", "週足60", "天井維持"]
+    for i in range(1, 13):
+        report += f"{i}.{stages[i-1]}: {pass_counts.get(i, 0)}件\n"
+    
+    report += "\n【確定の判定結果】\n" + ("\n".join(report_qualified_details) if report_qualified_details else "該当銘柄なし")
+    report += "\n\n--------------------------------------------------\n【条件一覧】\n1. 全データ取得成功\n2. 月足MA60クリア\n3. 出来高5万株クリア\n4. 下半身クリア\n5. 溜めMA5クリア\n6. 右肩上がり\n7. 長期
