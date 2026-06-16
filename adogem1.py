@@ -12,27 +12,17 @@ GCP_SA_KEY = os.environ.get('GCP_SA_KEY')
 pass_counts = {i: 0 for i in range(1, 13)}
 report_qualified_details = []
 
-# --- スプレッドシート関連（既存の関数をここに移植してください） ---
-def record_to_spreadsheet():
-    # ※ここにあなたの既存のシート1更新コードを記述してください
-    pass
-
-def update_sheet2_results():
-    # ※ここにあなたの既存のシート2更新コードを記述してください
-    pass
-
-# --- データ取得・加工 ---
+# --- データ取得 ---
 def get_stock_data_from_web(symbol):
-    time.sleep(0.3) # API負荷軽減
+    time.sleep(0.3)
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.T?range=5y&interval=1d"
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.T?range=2y&interval=1d"
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         if res.status_code != 200: return None
         result = res.json().get("chart", {}).get("result", [])
         if not result: return None
         quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
         timestamps = result[0].get("timestamp", [])
-        
         df = pd.DataFrame({
             "Close": quotes.get("close", []),
             "Open": quotes.get("open", []),
@@ -40,79 +30,95 @@ def get_stock_data_from_web(symbol):
             "Volume": quotes.get("volume", [])
         }, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
         return df.dropna().sort_index()
-    except Exception as e:
-        return None
+    except: return None
 
-# --- 判定ロジック ---
+# --- 判定ロジック（移植済み） ---
 def analyze_stock(code, df):
     global pass_counts, report_qualified_details
-    target_dt = pd.to_datetime(datetime.datetime.now().strftime("%Y-%m-%d")).normalize()
     
-    # 直近の日付が含まれるか確認
-    if target_dt not in df.index:
-        # 日付がない場合、最新の日付を使用するなどの調整が必要かもしれません
-        return
-
-    idx = df.index.get_loc(target_dt)
-    if idx < 60: return # データ不足
+    # 【修正】今日ではなく「データの最終日」をターゲットにする（週末や夜間対策）
+    idx = len(df) - 1
+    if idx < 100: return # データ不足
+    prev_idx = idx - 1
     
-    # 指標計算
-    c = df['Close']
-    ma5 = c.rolling(5).mean()
-    ma60 = c.rolling(60).mean()
-    ma100 = c.rolling(100).mean()
+    c = df['Close']; o = df['Open']; h = df['High']; v = df['Volume']
+    ma5 = c.rolling(5).mean(); ma60 = c.rolling(60).mean(); ma100 = c.rolling(100).mean()
+    ma24_m = c.rolling(24*20).mean() # 月足相当
     
-    # 判定 (※以前の条件ロジックをここに移植)
-    # 例：
-    if c.iloc[idx] > ma60.iloc[idx]: pass_counts[2] += 1
-    # ... (他11ステージの条件を記述) ...
-
-    # 合格した場合
-    # report_qualified_details.append(f"...")
-
-# --- メール送信 ---
-def send_email(report_text):
-    try:
-        msg = MIMEText(report_text)
-        msg['Subject'] = f"【検証レポート】{datetime.date.today()}"
-        msg['From'] = SENDER_EMAIL
-        msg['To'] = SENDER_EMAIL
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(SENDER_EMAIL, SENDER_PASSWORD)
-            server.sendmail(SENDER_EMAIL, SENDER_EMAIL, msg.as_string())
-        print("メール送信完了")
-    except Exception as e:
-        print(f"メール送信エラー: {e}")
+    # 1. 取得成功はメイン側で判定済みなのでスキップ
+    pass_counts[1] += 1
+    
+    # 2. 月足60 (簡易的にMA24*20で計算)
+    if c.iloc[idx] > ma24_m.iloc[idx]: pass_counts[2] += 1
+    else: return
+    
+    # 3. 出来高
+    if v.iloc[idx] >= 50000: pass_counts[3] += 1
+    else: return
+    
+    # 4. 下半身
+    if c.iloc[idx] > ma5.iloc[idx]: pass_counts[4] += 1
+    else: return
+    
+    # 5. 溜め
+    if c.iloc[prev_idx] < ma5.iloc[prev_idx]: pass_counts[5] += 1
+    else: return
+    
+    # 6. 右肩上がり (直近のMA60が上昇中)
+    if ma60.iloc[idx] > ma60.iloc[prev_idx]: pass_counts[6] += 1
+    else: return
+    
+    # 7. 長期T (MA100上昇中)
+    if ma100.iloc[idx] > ma100.iloc[prev_idx]: pass_counts[7] += 1
+    else: return
+    
+    # 8. 上ヒゲ回避
+    upper = h.iloc[idx] - max(o.iloc[idx], c.iloc[idx])
+    body = abs(c.iloc[idx] - o.iloc[idx])
+    if body == 0 or (upper <= (body * 1.5)): pass_counts[8] += 1
+    else: return
+    
+    # 9. 天井圏回避
+    if abs(c.iloc[idx] - ma100.iloc[idx]) / ma100.iloc[idx] >= 0.03: pass_counts[9] += 1
+    else: return
+    
+    # 10. 新高値
+    if ma5.iloc[idx] >= ma5.rolling(20).max().iloc[idx]: pass_counts[10] += 1
+    else: return
+    
+    # 11. 週足60 (簡易的にMA5*5で計算)
+    ma60_w = c.rolling(60*5).mean()
+    if c.iloc[idx] > ma60_w.iloc[idx]: pass_counts[11] += 1
+    else: return
+    
+    # 12. 天井維持
+    if (c.iloc[idx] / ma24_m.iloc[idx] <= 1.2):
+        pass_counts[12] += 1
+        # 結果記録
+        pct = ((c.iloc[idx] - c.iloc[prev_idx]) / c.iloc[prev_idx]) * 100
+        mark = "◎" if pct >= 2.0 else "◯"
+        report_qualified_details.append(f"{mark} | {code} | {int(c.iloc[idx])}円")
 
 # --- メイン処理 ---
 def main():
     start_r = int(sys.argv[1]) if len(sys.argv) > 1 else 1300
     end_r = int(sys.argv[2]) if len(sys.argv) > 2 else 10001
     
-    print(f"処理開始: {start_r}〜{end_r}")
-    
     for code in range(start_r, end_r):
-        if 1300 <= code <= 1600: continue # ETF/REIT除外
-        
+        if 1300 <= code <= 1600: continue
         df = get_stock_data_from_web(str(code))
-        if df is None: continue
-        
-        analyze_stock(str(code), df)
-        
-        if code % 100 == 0:
-            print(f"進捗: {code}番目処理中...")
+        if df is not None:
+            analyze_stock(str(code), df)
+        if code % 500 == 0: print(f"進捗: {code}番目処理中...")
 
-    # --- レポート生成 ---
-    report = f"--- {datetime.date.today()} 検証結果 ---\n\n【生存数】\n"
-    for i in range(1, 13):
-        report += f"{i}:{pass_counts[i]}件\n"
-    report += "\n【結果】\n" + ("\n".join(report_qualified_details) if report_qualified_details else "該当なし")
-    
-    send_email(report)
-    
-    # スプレッドシート更新
-    # record_to_spreadsheet()
-    # update_sheet2_results()
+    # メール送信
+    msg = MIMEText(f"--- 検証完了 ---\n生存数: {pass_counts}\n{report_qualified_details}")
+    msg['Subject'] = f"【検証レポート】{datetime.date.today()}"
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = SENDER_EMAIL
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.sendmail(SENDER_EMAIL, SENDER_EMAIL, msg.as_string())
 
 if __name__ == "__main__":
     main()
