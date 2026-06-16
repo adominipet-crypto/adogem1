@@ -6,14 +6,98 @@ from google.oauth2.service_account import Credentials
 # --- 環境設定 ---
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
+GCP_SA_KEY = os.environ.get('GCP_SA_KEY')
+SPREADSHEET_NAME = "adogem1"  # ※スプレッドシート名が異なる場合はここを書き換えてください
 
 # --- グローバル変数 ---
 pass_counts = {i: 0 for i in range(1, 13)}
 report_qualified_details = []
 
+# --- Google API 認証処理 ---
+def get_gspread_client():
+    if not GCP_SA_KEY:
+        print("警告: GCP_SA_KEY が設定されていません。スプレッドシート更新をスキップします。")
+        return None
+    try:
+        # JSON文字列、またはファイルパスの双方に対応
+        if GCP_SA_KEY.startswith('{'):
+            info = json.loads(GCP_SA_KEY)
+            creds = Credentials.from_service_account_info(
+                info, 
+                scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            )
+        else:
+            creds = Credentials.from_service_account_file(
+                GCP_SA_KEY,
+                scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            )
+        return gspread.authorize(creds)
+    except Exception as e:
+        print(f"Google認証エラー: {e}")
+        return None
+
+# --- シート1: 各ステージ生存数の記録 ---
+def record_to_spreadsheet():
+    gc = get_gspread_client()
+    if gc is None: return
+    try:
+        sh = gc.open(SPREADSHEET_NAME)
+        sheet = sh.get_worksheet(0)  # 一番左のシート (シート1)
+        
+        # [日付, ステージ1生存数, ステージ2生存数, ... ステージ12生存数]
+        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        row = [today_str] + [pass_counts[i] for i in range(1, 13)]
+        
+        sheet.append_row(row)
+        print("シート1（生存数履歴）への書き込みが成功しました。")
+    except Exception as e:
+        print(f"シート1更新エラー: {e}")
+
+# --- シート2: 確定の判定結果の記録 (データを分解して列ごとに保存) ---
+def update_sheet2_results():
+    if not report_qualified_details:
+        print("シート2に書き込む確定データ（該当銘柄）はありません。")
+        return
+        
+    gc = get_gspread_client()
+    if gc is None: return
+    try:
+        sh = gc.open(SPREADSHEET_NAME)
+        sheet = sh.get_worksheet(1)  # 左から2番目のシート (シート2)
+        
+        rows_to_append = []
+        for detail in report_qualified_details:
+            try:
+                # "◎ | 5076 | 2487円 (05-15) → 1営業日 | 2537円 (+2.03%)" を分解
+                parts = [p.strip() for p in detail.split("|")]
+                mark = parts[0]
+                code = parts[1]
+                
+                # 基準日・基準株価の抽出
+                base_part = parts[2].split("→")[0].strip()  # "2487円 (05-15)"
+                base_price = base_part.split("円")[0].strip()
+                base_date = base_part.split("(")[1].replace(")", "").strip()
+                
+                # 翌営業日株価・騰落率の抽出
+                next_part = parts[3]  # "2537円 (+2.03%)"
+                next_price = next_part.split("円")[0].strip()
+                pct = next_part.split("(")[1].replace(")", "").strip()
+                
+                # [判定日, マーク, 銘柄コード, 基準株価, 翌日株価, 騰落率] の順で格納
+                rows_to_append.append([base_date, mark, code, base_price, next_price, pct])
+            except:
+                # 万が一パースに失敗した場合は文字列のまま安全に1セルに記録
+                rows_to_append.append([datetime.date.today().strftime("%m-%d"), "", "", "", "", detail])
+                
+        if rows_to_append:
+            sheet.append_rows(rows_to_append)
+            print(f"シート2（判定結果詳細）へ {len(rows_to_append)} 件の書き込みが成功しました。")
+    except Exception as e:
+        print(f"シート2更新エラー: {e}")
+
 # --- データ取得 ---
 def get_stock_data_from_web(symbol):
-    time.sleep(0.3)  # アクセス制限・負荷対策のスリープ
+    time.sleep(0.3)
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.T?range=2y&interval=1d"
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
@@ -36,7 +120,7 @@ def get_stock_data_from_web(symbol):
 def analyze_stock(code, df):
     global pass_counts, report_qualified_details
     
-    idx = len(df) - 2 # 翌日判定のため、最新より1つ前を使用
+    idx = len(df) - 2
     if idx < 100: return
     prev_idx = idx - 1
     
@@ -70,6 +154,7 @@ def analyze_stock(code, df):
     else: return
     if (c.iloc[idx] / ma24_m.iloc[idx] <= 1.2):
         pass_counts[12] += 1
+        
         # --- 判定結果リスト作成 ---
         curr_c = c.iloc[idx]; next_c = c.iloc[idx+1]
         pct = ((next_c - curr_c) / curr_c) * 100
@@ -87,7 +172,7 @@ def send_email(report_text):
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.sendmail(SENDER_EMAIL, SENDER_EMAIL, msg.as_string())
 
-# --- メメイン処理 ---
+# --- メイン処理 ---
 def main():
     start_r = int(sys.argv[1]) if len(sys.argv) > 1 else 1300
     end_r = int(sys.argv[2]) if len(sys.argv) > 2 else 10001
@@ -95,7 +180,6 @@ def main():
     print(f"処理開始: {start_r}〜{end_r}")
     
     for code in range(start_r, end_r):
-        # データの有無に関わらず、確実に500件ごとにログを残す構造に変更
         if code % 500 == 0:
             print(f"【稼働確認】現在 {code} 番目を検証中...")
             
@@ -113,7 +197,6 @@ def main():
     
     report += "\n【確定の判定結果】\n" + ("\n".join(report_qualified_details) if report_qualified_details else "該当銘柄なし")
     
-    # 長い固定テキストは複数行クォートで安全に結合（SyntaxError対策）
     condition_text = """
 
 --------------------------------------------------
@@ -139,8 +222,18 @@ def main():
  
     report += condition_text
     
-    send_email(report)
-    print("全処理およびメール送信が正常に完了しました。")
+    # 1. メール送信
+    try:
+        send_email(report)
+        print("メール送信が完了しました。")
+    except Exception as e:
+        print(f"メール送信エラー: {e}")
+    
+    # 2. スプレッドシート更新
+    record_to_spreadsheet()
+    update_sheet2_results()
+    
+    print("すべての処理、メール送信、およびスプレッドシートへの記録が正常に完了しました。")
 
 if __name__ == "__main__":
     main()
