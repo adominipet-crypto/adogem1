@@ -14,7 +14,6 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 # --- グローバル変数 ---
-# コード1の生存数カウント（コード2の12ステージに対応）
 stage_survivors = {f"stage{i}": 0 for i in range(1, 13)}
 stats = {"★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0}
 sheet1_final_log = {}
@@ -61,7 +60,6 @@ def connect_spreadsheet(sheet_name="シート1"):
     if not gcp_key:
         raise ValueError("GCP_SA_KEY が設定されていません。")
     
-    # JSON文字列、またはファイルパスの双方に柔軟に対応
     if gcp_key.startswith('{'):
         creds = Credentials.from_service_account_info(json.loads(gcp_key), scopes=scopes)
     else:
@@ -122,7 +120,6 @@ def update_yesterday_results():
                 mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
                 cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
                 
-                # メール報告用のキー判定（潜在バグを修正：12.天井維持のうち、通常以外(=★PPP)なら完全合格へマッピング）
                 s_key = reverse_stage_map.get(stage_name, "completed_pass")
                 if stage_name == "12. 天井圏維持" and row[3] != "通常": 
                     s_key = "completed_pass"
@@ -162,13 +159,13 @@ def update_sheet2_results():
         if cell_list: sheet2.update_cells(cell_list, value_input_option='RAW')
     except Exception as e: print(f"Sheet2更新エラー: {e}")
 
-# --- 株価選定ロジック (コード2の計算条件を最新日基準にブレンド) ---
+# --- 株価選定ロジック ---
 def analyze_stock(symbol):
     df = get_stock_data_fallback(symbol, force_check_date=True)
     if df is None: return "SKIP"
     
-    idx = len(df) - 1  # 当日（最新日）を基準に判定して「判定待ち」を作る
-    if idx < 480: return "SKIP"  # 24ヶ月移動平均(480日分)の計算に必要なデータ長を確保
+    idx = len(df) - 1
+    if idx < 480: return "SKIP"
     
     prev_idx = idx - 1
 
@@ -181,11 +178,10 @@ def analyze_stock(symbol):
     ma24_m = c.rolling(24*20).mean() 
     ma60_w = c.rolling(60*5).mean()
 
-    # --- 12ステージ判定 (コード2の条件式をそのまま適用) ---
     # 1. データ取得成功
     stage_survivors["stage1"] += 1
     
-    # 2. 月足60 (コード2の c > ma60 判定)
+    # 2. 月足60
     if c.iloc[idx] > ma60.iloc[idx]: 
         stage_survivors["stage2"] += 1
     else: return "SKIP"
@@ -195,17 +191,17 @@ def analyze_stock(symbol):
         stage_survivors["stage3"] += 1
     else: return "SKIP"
     
-    # 4. 下半身 (コード2の c > ma5 判定)
+    # 4. 下半身
     if c.iloc[idx] > ma5.iloc[idx]: 
         stage_survivors["stage4"] += 1
     else: return "SKIP"
     
-    # 5. 溜め (コード2の 前日c < 前日ma5 判定)
+    # 5. 溜め
     if c.iloc[prev_idx] < ma5.iloc[prev_idx]: 
         stage_survivors["stage5"] += 1
     else: return "SKIP"
     
-    # 6. 右肩 (コード2の ma60が前日より上昇 判定)
+    # 6. 右肩
     if ma60.iloc[idx] > ma60.iloc[prev_idx]: 
         stage_survivors["stage6"] += 1
     else: return "SKIP"
@@ -214,7 +210,7 @@ def analyze_stock(symbol):
     ppp_label = "★PPP " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0)) else ("★PPP(Short) " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx]) else "")
     data_date = df.index[idx].strftime("%Y-%m-%d")
     
-    # 7. 長期トレンド (コード2の ma100が前日より上昇 判定)
+    # 7. 長期トレンド
     if ma100.iloc[idx] > ma100.iloc[prev_idx]: 
         stage_survivors["stage7"] += 1
     else:
@@ -267,15 +263,39 @@ def analyze_stock(symbol):
     else: stats["normal_detect"] += 1
     return "OK"
 
-# --- スプレッドシート記録 (コード1の1行ずつ判定待ちとして書き込む高度なロジック) ---
+# --- スプレッドシート記録 (シート1およびシート2への書き込み) ---
 def record_to_spreadsheet():
+    # シート1への書き込み
     try:
-        sheet = connect_spreadsheet("シート1")
-        new_rows = [[r["date"], code, {"trend_align":"7. 長トレンド","upper_shadow":"8. 上ヒゲ","ceiling_avoid":"9. 天井圏回避","new_high_pass":"10. 新高値","weekly_ma_pass":"11. 週足60","monthly_high_pass":"12. 天井圏維持","completed_pass":"12. 天井圏維持"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in ["trend_align", "upper_shadow", "ceiling_avoid", "new_high_pass", "weekly_ma_pass", "monthly_high_pass", "completed_pass"]]
-        if new_rows: sheet.append_rows(new_rows, value_input_option='RAW')
-        print(f"シート1に当日のスキャン結果を {len(new_rows)} 件（判定待ち）追記しました。")
+        sheet1 = connect_spreadsheet("シート1")
+        new_rows_s1 = [[r["date"], code, {"trend_align":"7. 長トレンド","upper_shadow":"8. 上ヒゲ","ceiling_avoid":"9. 天井圏回避","new_high_pass":"10. 新高値","weekly_ma_pass":"11. 週足60","monthly_high_pass":"12. 天井圏維持","completed_pass":"12. 天井圏維持"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in ["trend_align", "upper_shadow", "ceiling_avoid", "new_high_pass", "weekly_ma_pass", "monthly_high_pass", "completed_pass"]]
+        if new_rows_s1: 
+            sheet1.append_rows(new_rows_s1, value_input_option='RAW')
+            print(f"シート1に当日のスキャン結果を {len(new_rows_s1)} 件（判定待ち）追記しました。")
     except Exception as e:
         print(f"シート1への追記エラー: {e}")
+
+    # シート2への書き込み（新規追加：完全合格銘柄のみ）
+    try:
+        if selected_stocks:
+            sheet2 = connect_spreadsheet("シート2")
+            new_rows_s2 = []
+            for code, r in selected_stocks.items():
+                # 1行目: 日付, コード, 基準値, ラベル, 1日目〜15日目
+                row1 = [r["date"], code, r["price"], r["ppp_label"].strip() or "通常"] + [f"{d}日目" for d in range(1, 16)]
+                # 2行目: 終値用の行
+                row2 = ["", "", "", "終値"]
+                # 3行目: 騰落率用の行
+                row3 = ["", "", "", "騰落率"]
+                # 4行目: 空白行（ブロック区切り用）
+                row4 = ["", "", "", ""]
+                new_rows_s2.extend([row1, row2, row3, row4])
+            
+            if new_rows_s2:
+                sheet2.append_rows(new_rows_s2, value_input_option='RAW')
+                print(f"シート2に完全合格銘柄を {len(selected_stocks)} 件追記しました。")
+    except Exception as e:
+        print(f"シート2への追記エラー: {e}")
 
 # --- メイン処理 ---
 def main():
@@ -290,7 +310,7 @@ def main():
     print(f"処理開始: {start_r}〜{end_r}")
     
     for s in [str(i) for i in range(start_r, end_r)]: 
-        if 1300 <= int(s) <= 1600: continue  # ETF/REIT除外 (コード2の条件)
+        if 1300 <= int(s) <= 1600: continue  # ETF/REIT除外
         analyze_stock(s)
         
     # 3. スプレッドシートへ判定待ちデータを一括書き込み
@@ -343,7 +363,6 @@ def main():
     judgement_block = "\n".join(judgement_lines).strip()
     final_list_str = "\n".join(final_list) if final_list else '  該当なし'
 
-    # コード2の条件表示事項テキスト（末尾用案内文）
     condition_text = """
 
 --------------------------------------------------
