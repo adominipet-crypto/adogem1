@@ -146,11 +146,16 @@ def update_sheet2_results():
             if df is None: continue
             future_df = df[df.index.date > sel_date]
             if future_df.empty: continue
+            
+            # 1日目（翌日終値）の更新 -> 5列目(E列)
             first_day = future_df.iloc[0]
             close_1 = int(first_day['Close'])
             pct_1 = ((close_1 - selected_price) / selected_price) * 100
             cell_list.extend([gspread.Cell(i+2, 5, close_1), gspread.Cell(i+3, 5, f"{pct_1:+.2f}%")])
-            for day_idx in range(1, min(len(future_df), 15)):
+            
+            # 2日目〜14日目の更新（実質スプレッドシート上の3〜15営業日枠） -> 6列目(F列)〜18列目(R列)
+            # 枠が14個しかないため上限を14に制限（列ズレを防止）
+            for day_idx in range(1, min(len(future_df), 14)):
                 col = day_idx + 5
                 close_curr = int(future_df.iloc[day_idx]['Close'])
                 close_prev = int(future_df.iloc[day_idx-1]['Close'])
@@ -263,9 +268,9 @@ def analyze_stock(symbol):
     else: stats["normal_detect"] += 1
     return "OK"
 
-# --- スプレッドシート記録 (シート1およびシート2への書き込み) ---
+# --- スプレッドシート記録 ---
 def record_to_spreadsheet():
-    # シート1への書き込み
+    # シート1への書き込み（判定待ちとして追記）
     try:
         sheet1 = connect_spreadsheet("シート1")
         new_rows_s1 = [[r["date"], code, {"trend_align":"7. 長トレンド","upper_shadow":"8. 上ヒゲ","ceiling_avoid":"9. 天井圏回避","new_high_pass":"10. 新高値","weekly_ma_pass":"11. 週足60","monthly_high_pass":"12. 天井圏維持","completed_pass":"12. 天井圏維持"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in ["trend_align", "upper_shadow", "ceiling_avoid", "new_high_pass", "weekly_ma_pass", "monthly_high_pass", "completed_pass"]]
@@ -275,20 +280,21 @@ def record_to_spreadsheet():
     except Exception as e:
         print(f"シート1への追記エラー: {e}")
 
-    # シート2への書き込み（新規追加：完全合格銘柄のみ）
+    # シート2への書き込み（サンプル例の構成に完全準拠して追記）
     try:
         if selected_stocks:
             sheet2 = connect_spreadsheet("シート2")
             new_rows_s2 = []
             for code, r in selected_stocks.items():
-                # 1行目: 日付, コード, 基準値, ラベル, 1日目〜15日目
-                row1 = [r["date"], code, r["price"], r["ppp_label"].strip() or "通常"] + [f"{d}日目" for d in range(1, 16)]
-                # 2行目: 終値用の行
-                row2 = ["", "", "", "終値"]
-                # 3行目: 騰落率用の行
-                row3 = ["", "", "", "騰落率"]
+                # 1行目: 日付, コード, 基準値, 空白, 翌日終値, 3〜15営業日, 右側枠見出し
+                row1 = [r["date"], code, r["price"], ""] + ["翌日終値"] + [f"{d}営業日" for d in range(3, 16)] + ["差額(対選定)", "判定(対選定)", "比率(%)"]
+                # 2行目: ステージ名、および未更新部分の初期値「判定」を14個配置、右側は空白（数式用）
+                row2 = ["通過条件ステージ", "12. 天井圏維持", "", ""] + ["判定"] * 14 + ["", "", ""]
+                # 3行目: PPPレーベル、および未更新部分の初期値「前日比(%)」を14個配置
+                row3 = ["PPP", r["ppp_label"].strip() or "通常", "", ""] + ["前日比(%)"] * 14 + ["", "", ""]
                 # 4行目: 空白行（ブロック区切り用）
                 row4 = ["", "", "", ""]
+                
                 new_rows_s2.extend([row1, row2, row3, row4])
             
             if new_rows_s2:
