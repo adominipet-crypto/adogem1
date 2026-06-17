@@ -1,202 +1,349 @@
-import os, sys, time, datetime, gspread, json, requests, smtplib
+import warnings
+warnings.simplefilter('ignore', FutureWarning)
+
 import pandas as pd
+import smtplib
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import os, time, sys, datetime, gspread, json, requests, traceback
 from google.oauth2.service_account import Credentials
+from gspread.exceptions import APIError  
 
 # --- 環境設定 ---
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
-GCP_SA_KEY = os.environ.get('GCP_SA_KEY')
-SPREADSHEET_NAME = "adogem1"  # ※スプレッドシート名が異なる場合はここを書き換えてください
 
 # --- グローバル変数 ---
-pass_counts = {i: 0 for i in range(1, 13)}
-report_qualified_details = []
+# コード1の生存数カウント（コード2の12ステージに対応）
+stage_survivors = {f"stage{i}": 0 for i in range(1, 13)}
+stats = {"★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0}
+sheet1_final_log = {}
+selected_stocks = {}
+GLOBAL_LATEST_DATE = None  
+stage_results_report = {
+    "trend_align": [],
+    "upper_shadow": [],
+    "ceiling_avoid": [],
+    "new_high_pass": [],
+    "weekly_ma_pass": [],
+    "monthly_high_pass": [],
+    "completed_pass": []
+}
 
-# --- Google API 認証処理 ---
-def get_gspread_client():
-    if not GCP_SA_KEY:
-        print("警告: GCP_SA_KEY が設定されていません。スプレッドシート更新をスキップします。")
-        return None
-    try:
-        # JSON文字列、またはファイルパスの双方に対応
-        if GCP_SA_KEY.startswith('{'):
-            info = json.loads(GCP_SA_KEY)
-            creds = Credentials.from_service_account_info(
-                info, 
-                scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-            )
-        else:
-            creds = Credentials.from_service_account_file(
-                GCP_SA_KEY,
-                scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-            )
-        return gspread.authorize(creds)
-    except Exception as e:
-        print(f"Google認証エラー: {e}")
-        return None
+STAGE_LABELS = {
+    "trend_align": "7.長トレンド",
+    "upper_shadow": "8.上ヒゲ",
+    "ceiling_avoid": "9.天井回避",
+    "new_high_pass": "10.新高値",
+    "weekly_ma_pass": "11.週足60",
+    "monthly_high_pass": "12.天井維持",
+    "completed_pass": "完全合格"
+}
 
-# --- シート1: 各ステージ生存数の記録 ---
-def record_to_spreadsheet():
-    gc = get_gspread_client()
-    if gc is None: return
+# --- 共通関数 ---
+def fetch_global_latest_date():
+    global GLOBAL_LATEST_DATE
     try:
-        sh = gc.open(SPREADSHEET_NAME)
-        sheet = sh.get_worksheet(0)  # 一番左のシート (シート1)
-        
-        # [日付, ステージ1生存数, ステージ2生存数, ... ステージ12生存数]
-        today_str = datetime.date.today().strftime("%Y-%m-%d")
-        row = [today_str] + [pass_counts[i] for i in range(1, 13)]
-        
-        sheet.append_row(row)
-        print("シート1（生存数履歴）への書き込みが成功しました。")
-    except Exception as e:
-        print(f"シート1更新エラー: {e}")
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/^N225?range=1mo&interval=1d&nocache={int(time.time())}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        res = requests.get(url, headers=headers, timeout=15)
+        timestamps = res.json().get("chart", {}).get("result", [])[0].get("timestamp", [])
+        GLOBAL_LATEST_DATE = datetime.datetime.fromtimestamp(timestamps[-1]).date()
+    except:
+        now = datetime.datetime.now()
+        target = now.date() - datetime.timedelta(days=1)
+        while target.weekday() >= 5: target -= datetime.timedelta(days=1)
+        GLOBAL_LATEST_DATE = target
 
-# --- シート2: 確定の判定結果の記録 (データを分解して列ごとに保存) ---
-def update_sheet2_results():
-    if not report_qualified_details:
-        print("シート2に書き込む確定データ（該当銘柄）はありません。")
-        return
+def connect_spreadsheet(sheet_name="シート1"):
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    gcp_key = os.environ.get('GCP_SA_KEY')
+    if not gcp_key:
+        raise ValueError("GCP_SA_KEY が設定されていません。")
+    
+    # JSON文字列、またはファイルパスの双方に柔軟に対応
+    if gcp_key.startswith('{'):
+        creds = Credentials.from_service_account_info(json.loads(gcp_key), scopes=scopes)
+    else:
+        creds = Credentials.from_service_account_file(gcp_key, scopes=scopes)
         
-    gc = get_gspread_client()
-    if gc is None: return
-    try:
-        sh = gc.open(SPREADSHEET_NAME)
-        sheet = sh.get_worksheet(1)  # 左から2番目のシート (シート2)
-        
-        rows_to_append = []
-        for detail in report_qualified_details:
-            try:
-                # "◎ | 5076 | 2487円 (05-15) → 1営業日 | 2537円 (+2.03%)" を分解
-                parts = [p.strip() for p in detail.split("|")]
-                mark = parts[0]
-                code = parts[1]
-                
-                # 基準日・基準株価の抽出
-                base_part = parts[2].split("→")[0].strip()  # "2487円 (05-15)"
-                base_price = base_part.split("円")[0].strip()
-                base_date = base_part.split("(")[1].replace(")", "").strip()
-                
-                # 翌営業日株価・騰落率の抽出
-                next_part = parts[3]  # "2537円 (+2.03%)"
-                next_price = next_part.split("円")[0].strip()
-                pct = next_part.split("(")[1].replace(")", "").strip()
-                
-                # [判定日, マーク, 銘柄コード, 基準株価, 翌日株価, 騰落率] の順で格納
-                rows_to_append.append([base_date, mark, code, base_price, next_price, pct])
-            except:
-                # 万が一パースに失敗した場合は文字列のまま安全に1セルに記録
-                rows_to_append.append([datetime.date.today().strftime("%m-%d"), "", "", "", "", detail])
-                
-        if rows_to_append:
-            sheet.append_rows(rows_to_append)
-            print(f"シート2（判定結果詳細）へ {len(rows_to_append)} 件の書き込みが成功しました。")
-    except Exception as e:
-        print(f"シート2更新エラー: {e}")
+    return gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ").worksheet(sheet_name)
 
-# --- データ取得 ---
-def get_stock_data_from_web(symbol):
-    time.sleep(0.3)
+def get_stock_data_fallback(symbol, force_check_date=True):
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.T?range=2y&interval=1d"
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.T?range=5y&interval=1d&nocache={int(time.time())}" 
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
         if res.status_code != 200: return None
         result = res.json().get("chart", {}).get("result", [])
         if not result: return None
         quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
         timestamps = result[0].get("timestamp", [])
-        df = pd.DataFrame({
-            "Close": quotes.get("close", []),
-            "Open": quotes.get("open", []),
-            "High": quotes.get("high", []),
-            "Volume": quotes.get("volume", [])
-        }, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
-        return df.dropna().sort_index()
-    except:
-        return None
+        df = pd.DataFrame({"Close": quotes.get("close", []), "Open": quotes.get("open", []), "High": quotes.get("high", []), "Low": quotes.get("low", []), "Volume": quotes.get("volume", [])}, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
+        df = df.dropna().sort_index()
+        if force_check_date and GLOBAL_LATEST_DATE and df.index[-1].date() != GLOBAL_LATEST_DATE: return None
+        return df
+    except: return None
 
-# --- 判定ロジック ---
-def analyze_stock(code, df):
-    global pass_counts, report_qualified_details
+def get_next_trading_day_data(symbol, base_date):
+    try:
+        df = get_stock_data_fallback(symbol, force_check_date=False)
+        if df is None: return None
+        future_df = df[df.index.date > base_date]
+        return future_df.iloc[0] if not future_df.empty else None
+    except: return None
+
+# --- 判定処理 (前日分の自動答え合わせ) ---
+def update_yesterday_results():
+    global stage_results_report
+    try:
+        sheet = connect_spreadsheet("シート1")
+        all_records = sheet.get_all_values()
+        cell_list = []
+        reverse_stage_map = {
+            "7. 長トレンド": "trend_align",
+            "8. 上ヒゲ": "upper_shadow",
+            "9. 天井圏回避": "ceiling_avoid",
+            "10. 新高値": "new_high_pass",
+            "11. 週足60": "weekly_ma_pass",
+            "12. 天井圏維持": "monthly_high_pass"
+        }
+        for i, row in enumerate(all_records):
+            if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
+            code, row_date_str = row[1], row[0]
+            stage_name = row[2]
+            try: 
+                selected_price = int(row[4])
+                sel_date = datetime.datetime.strptime(row_date_str, "%Y-%m-%d").date()
+            except: continue
+            next_data = get_next_trading_day_data(code, sel_date)
+            if next_data is not None:
+                next_close = int(next_data['Close'])
+                pct = ((next_close - selected_price) / selected_price) * 100
+                mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
+                cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
+                
+                # メール報告用のキー判定（潜在バグを修正：12.天井維持のうち、通常以外(=★PPP)なら完全合格へマッピング）
+                s_key = reverse_stage_map.get(stage_name, "completed_pass")
+                if stage_name == "12. 天井圏維持" and row[3] != "通常": 
+                    s_key = "completed_pass"
+                
+                result_line = f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
+                stage_results_report[s_key].append(result_line)
+        if cell_list: sheet.update_cells(cell_list)
+    except Exception as e: print(f"Sheet1判定エラー: {e}")
+
+def update_sheet2_results():
+    try:
+        sheet2 = connect_spreadsheet("シート2")
+        all_records = sheet2.get_all_values()
+        cell_list = []
+        for i in range(0, len(all_records), 4):
+            if i >= len(all_records) or len(all_records[i]) < 3: continue
+            data_date_str, code = all_records[i][0], all_records[i][1]
+            if not code or data_date_str == "選定日付": continue
+            try: 
+                selected_price = int(all_records[i][2])
+                sel_date = datetime.datetime.strptime(data_date_str, "%Y-%m-%d").date()
+            except: continue
+            df = get_stock_data_fallback(code, force_check_date=False)
+            if df is None: continue
+            future_df = df[df.index.date > sel_date]
+            if future_df.empty: continue
+            first_day = future_df.iloc[0]
+            close_1 = int(first_day['Close'])
+            pct_1 = ((close_1 - selected_price) / selected_price) * 100
+            cell_list.extend([gspread.Cell(i+2, 5, close_1), gspread.Cell(i+3, 5, f"{pct_1:+.2f}%")])
+            for day_idx in range(1, min(len(future_df), 15)):
+                col = day_idx + 5
+                close_curr = int(future_df.iloc[day_idx]['Close'])
+                close_prev = int(future_df.iloc[day_idx-1]['Close'])
+                pct_day = ((close_curr - close_prev) / close_prev) * 100
+                cell_list.extend([gspread.Cell(i+2, col, close_curr), gspread.Cell(i+3, col, f"{pct_day:+.2f}%")])
+        if cell_list: sheet2.update_cells(cell_list, value_input_option='RAW')
+    except Exception as e: print(f"Sheet2更新エラー: {e}")
+
+# --- 株価選定ロジック (コード2の計算条件を最新日基準にブレンド) ---
+def analyze_stock(symbol):
+    df = get_stock_data_fallback(symbol, force_check_date=True)
+    if df is None: return "SKIP"
     
-    idx = len(df) - 2
-    if idx < 100: return
+    idx = len(df) - 1  # 当日（最新日）を基準に判定して「判定待ち」を作る
+    if idx < 480: return "SKIP"  # 24ヶ月移動平均(480日分)の計算に必要なデータ長を確保
+    
     prev_idx = idx - 1
-    
+
     c = df['Close']; o = df['Open']; h = df['High']; v = df['Volume']
-    ma5 = c.rolling(5).mean(); ma60 = c.rolling(60).mean(); ma100 = c.rolling(100).mean()
+    ma5 = c.rolling(5).mean()
+    ma20 = c.rolling(20).mean()
+    ma60 = c.rolling(60).mean()
+    ma100 = c.rolling(100).mean()
+    ma300 = c.rolling(300).mean()
     ma24_m = c.rolling(24*20).mean() 
     ma60_w = c.rolling(60*5).mean()
 
-    # --- 12ステージ判定 ---
-    pass_counts[1] += 1
-    if c.iloc[idx] > ma60.iloc[idx]: pass_counts[2] += 1
-    else: return
-    if v.iloc[idx] >= 50000: pass_counts[3] += 1
-    else: return
-    if c.iloc[idx] > ma5.iloc[idx]: pass_counts[4] += 1
-    else: return
-    if c.iloc[prev_idx] < ma5.iloc[prev_idx]: pass_counts[5] += 1
-    else: return
-    if ma60.iloc[idx] > ma60.iloc[prev_idx]: pass_counts[6] += 1
-    else: return
-    if ma100.iloc[idx] > ma100.iloc[prev_idx]: pass_counts[7] += 1
-    else: return
-    upper = h.iloc[idx] - max(o.iloc[idx], c.iloc[idx]); body = abs(c.iloc[idx] - o.iloc[idx])
-    if body == 0 or (upper <= (body * 1.5)): pass_counts[8] += 1
-    else: return
-    if abs(c.iloc[idx] - ma100.iloc[idx]) / ma100.iloc[idx] >= 0.03: pass_counts[9] += 1
-    else: return
-    if ma5.iloc[idx] >= ma5.rolling(20).max().iloc[idx]: pass_counts[10] += 1
-    else: return
-    if c.iloc[idx] > ma60_w.iloc[idx]: pass_counts[11] += 1
-    else: return
-    if (c.iloc[idx] / ma24_m.iloc[idx] <= 1.2):
-        pass_counts[12] += 1
+    # --- 12ステージ判定 (コード2の条件式をそのまま適用) ---
+    # 1. データ取得成功
+    stage_survivors["stage1"] += 1
+    
+    # 2. 月足60 (コード2の c > ma60 判定)
+    if c.iloc[idx] > ma60.iloc[idx]: 
+        stage_survivors["stage2"] += 1
+    else: return "SKIP"
+    
+    # 3. 出来高5万株以上
+    if v.iloc[idx] >= 50000: 
+        stage_survivors["stage3"] += 1
+    else: return "SKIP"
+    
+    # 4. 下半身 (コード2の c > ma5 判定)
+    if c.iloc[idx] > ma5.iloc[idx]: 
+        stage_survivors["stage4"] += 1
+    else: return "SKIP"
+    
+    # 5. 溜め (コード2の 前日c < 前日ma5 判定)
+    if c.iloc[prev_idx] < ma5.iloc[prev_idx]: 
+        stage_survivors["stage5"] += 1
+    else: return "SKIP"
+    
+    # 6. 右肩 (コード2の ma60が前日より上昇 判定)
+    if ma60.iloc[idx] > ma60.iloc[prev_idx]: 
+        stage_survivors["stage6"] += 1
+    else: return "SKIP"
+    
+    # PPP判定用レーベル作成
+    ppp_label = "★PPP " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0)) else ("★PPP(Short) " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx]) else "")
+    data_date = df.index[idx].strftime("%Y-%m-%d")
+    
+    # 7. 長期トレンド (コード2の ma100が前日より上昇 判定)
+    if ma100.iloc[idx] > ma100.iloc[prev_idx]: 
+        stage_survivors["stage7"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
         
-        # --- 判定結果リスト作成 ---
-        curr_c = c.iloc[idx]; next_c = c.iloc[idx+1]
-        pct = ((next_c - curr_c) / curr_c) * 100
-        mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct >= -0.1 else "✕"
-        date_str = df.index[idx].strftime("%m-%d")
-        report_qualified_details.append(f"{mark} | {code} | {int(curr_c)}円 ({date_str}) → 1営業日 | {int(next_c)}円 ({pct:+.2f}%)")
+    # 8. 上ヒゲクリア
+    upper = h.iloc[idx] - max(o.iloc[idx], c.iloc[idx])
+    body = abs(c.iloc[idx] - o.iloc[idx])
+    if body == 0 or (upper <= (body * 1.5)): 
+        stage_survivors["stage8"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "upper_shadow", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+        
+    # 9. 天井圏MA100回避
+    if (abs(c.iloc[idx] - ma100.iloc[idx]) / ma100.iloc[idx]) >= 0.03: 
+        stage_survivors["stage9"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "ceiling_avoid", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+        
+    # 10. 新高値MA5更新
+    if ma5.iloc[idx] >= ma5.rolling(20).max().iloc[idx]: 
+        stage_survivors["stage10"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "new_high_pass", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+        
+    # 11. 週足MA60クリア
+    if c.iloc[idx] > ma60_w.iloc[idx]: 
+        stage_survivors["stage11"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "weekly_ma_pass", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+        
+    # 12. 天井圏維持
+    if (c.iloc[idx] / ma24_m.iloc[idx] <= 1.2):
+        stage_survivors["stage12"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "monthly_high_pass", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+        
+    # 全ステージ完全合格の記録
+    sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "completed_pass", "ppp_label": ppp_label, "date": data_date}
+    selected_stocks[symbol] = {"price": int(c.iloc[idx]), "ppp_label": ppp_label, "date": data_date}
+    
+    if "★PPP " in ppp_label: stats["★PPP"] += 1
+    elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
+    else: stats["normal_detect"] += 1
+    return "OK"
 
-# --- メール送信 ---
-def send_email(report_text):
-    msg = MIMEText(report_text, 'plain', 'utf-8')
-    msg['Subject'] = f"【検証レポート】{datetime.date.today()}"
-    msg['From'] = SENDER_EMAIL
-    msg['To'] = SENDER_EMAIL
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        server.sendmail(SENDER_EMAIL, SENDER_EMAIL, msg.as_string())
+# --- スプレッドシート記録 (コード1の1行ずつ判定待ちとして書き込む高度なロジック) ---
+def record_to_spreadsheet():
+    try:
+        sheet = connect_spreadsheet("シート1")
+        new_rows = [[r["date"], code, {"trend_align":"7. 長トレンド","upper_shadow":"8. 上ヒゲ","ceiling_avoid":"9. 天井圏回避","new_high_pass":"10. 新高値","weekly_ma_pass":"11. 週足60","monthly_high_pass":"12. 天井圏維持","completed_pass":"12. 天井圏維持"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in ["trend_align", "upper_shadow", "ceiling_avoid", "new_high_pass", "weekly_ma_pass", "monthly_high_pass", "completed_pass"]]
+        if new_rows: sheet.append_rows(new_rows, value_input_option='RAW')
+        print(f"シート1に当日のスキャン結果を {len(new_rows)} 件（判定待ち）追記しました。")
+    except Exception as e:
+        print(f"シート1への追記エラー: {e}")
 
 # --- メイン処理 ---
 def main():
-    start_r = int(sys.argv[1]) if len(sys.argv) > 1 else 1300
-    end_r = int(sys.argv[2]) if len(sys.argv) > 2 else 10001
+    fetch_global_latest_date()
     
+    # 1. 過去データの自動答え合わせ実行
+    update_yesterday_results()
+    update_sheet2_results()
+    
+    # 2. 当日の全銘柄スクリーニング
+    start_r, end_r = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
     print(f"処理開始: {start_r}〜{end_r}")
     
-    for code in range(start_r, end_r):
-        if code % 500 == 0:
-            print(f"【稼働確認】現在 {code} 番目を検証中...")
-            
-        if 1300 <= code <= 1600: continue # ETF/REIT除外
+    for s in [str(i) for i in range(start_r, end_r)]: 
+        if 1300 <= int(s) <= 1600: continue  # ETF/REIT除外 (コード2の条件)
+        analyze_stock(s)
         
-        df = get_stock_data_from_web(str(code))
-        if df is not None: 
-            analyze_stock(str(code), df)
+    # 3. スプレッドシートへ判定待ちデータを一括書き込み
+    record_to_spreadsheet()
+    
+    # 4. レポートメールの組み立て
+    final_list = [f"  {'★PPP ' in s['ppp_label'] and s['ppp_label'] or ''}■ {code} | {s['price']}円 ({s['date'][5:]})" for code, s in sorted(selected_stocks.items())]
+    header = f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}"
+    
+    survivors_block = (
+        "【各ステージ生存数】\n"
+        f"1.取得: {stage_survivors['stage1']}\n"
+        f"2.月足60: {stage_survivors['stage2']}\n"
+        f"3.出来高: {stage_survivors['stage3']}\n"
+        f"4.下半身: {stage_survivors['stage4']}\n"
+        f"5.溜め: {stage_survivors['stage5']}\n"
+        f"6.右肩: {stage_survivors['stage6']}\n"
+        f"7.長期T: {stage_survivors['stage7']}\n"
+        f"8.上ヒゲ: {stage_survivors['stage8']}\n"
+        f"9.天井回避: {stage_survivors['stage9']}\n"
+        f"10.新高値: {stage_survivors['stage10']}\n"
+        f"11.週足60: {stage_survivors['stage11']}\n"
+        f"12.天井維持: {stage_survivors['stage12']}"
+    )
+    
+    judgement_lines = ["【本日確定の判定結果】"]
+    has_any_result = False
+    stage_count_map = {
+        "trend_align": stage_survivors['stage7'],
+        "upper_shadow": stage_survivors['stage8'],
+        "ceiling_avoid": stage_survivors['stage9'],
+        "new_high_pass": stage_survivors['stage10'],
+        "weekly_ma_pass": stage_survivors['stage11'],
+        "monthly_high_pass": stage_survivors['stage12'],
+        "completed_pass": len(final_list)
+    }
 
-    # --- レポート生成 ---
-    report = f"--- {datetime.date.today()} 検証結果 ---\n\n【各ステージ生存数】\n"
-    stages = ["取得", "月足60", "出来高", "下半身", "溜め", "右肩", "長期T", "上ヒゲ", "天井回避", "新高値", "週足60", "天井維持"]
-    for i in range(1, 13):
-        report += f"{i}.{stages[i-1]}: {pass_counts.get(i, 0)}件\n"
-    
-    report += "\n【確定の判定結果】\n" + ("\n".join(report_qualified_details) if report_qualified_details else "該当銘柄なし")
-    
+    for key, lines in stage_results_report.items():
+        if lines:
+            has_any_result = True
+            label = STAGE_LABELS.get(key, "不明なステージ")
+            count = stage_count_map.get(key, 0)
+            judgement_lines.append(f"{label}: {count}件中、前日クリアした銘柄の答え合わせ")
+            judgement_lines.extend(lines)
+            judgement_lines.append("")
+            
+    if not has_any_result:
+        judgement_lines.append("  該当なし")
+        
+    judgement_block = "\n".join(judgement_lines).strip()
+    final_list_str = "\n".join(final_list) if final_list else '  該当なし'
+
+    # コード2の条件表示事項テキスト（末尾用案内文）
     condition_text = """
 
 --------------------------------------------------
@@ -219,21 +366,33 @@ def main():
  ◯ ： +0.1%〜+2.0%
  ▲ ： -0.1%〜+0.1%
  ✕ ： -0.1%未満"""
- 
-    report += condition_text
+
+    body = (
+        f"==================================================\n"
+        f"{header}\n"
+        f"総対象: {end_r-start_r}件\n\n"
+        f"{survivors_block}\n\n"
+        f"★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n"
+        f"【完全合格一覧】\n"
+        f"{final_list_str}\n\n"
+        f"==================================================\n"
+        f"{judgement_block}"
+        f"{condition_text}"
+    )
     
-    # 1. メール送信
+    # 5. メール送信
     try:
-        send_email(report)
-        print("メール送信が完了しました。")
+        msg = MIMEMultipart()
+        msg['From'], msg['To'], msg['Subject'] = SENDER_EMAIL, SENDER_EMAIL, f"📊 adoGEM レポート {len(final_list)}件"
+        msg.attach(MIMEText(body, 'plain'))
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print("検証レポートメールを正常に送信しました。")
     except Exception as e:
         print(f"メール送信エラー: {e}")
-    
-    # 2. スプレッドシート更新
-    record_to_spreadsheet()
-    update_sheet2_results()
-    
-    print("すべての処理、メール送信、およびスプレッドシートへの記録が正常に完了しました。")
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
     main()
