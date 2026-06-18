@@ -135,11 +135,12 @@ def update_sheet2_results():
         all_records = sheet2.get_all_values()
         cell_list = []
         for i in range(0, len(all_records), 4):
-            if i >= len(all_records) or len(all_records[i]) < 3: continue
-            data_date_str, code = all_records[i][0], all_records[i][1]
+            if i >= len(all_records) or len(all_records[i]) < 20: continue
+            # A列開始に伴い、右側に移動した「選定日付(R列:18番目)」「コード(S列:19番目)」「選定株価(T列:20番目)」から情報を読み込む
+            data_date_str, code = all_records[i][17], all_records[i][18]
             if not code or data_date_str == "選定日付": continue
             try: 
-                selected_price = int(all_records[i][2])
+                selected_price = int(all_records[i][19])
                 sel_date = datetime.datetime.strptime(data_date_str, "%Y-%m-%d").date()
             except: continue
             df = get_stock_data_fallback(code, force_check_date=False)
@@ -147,16 +148,15 @@ def update_sheet2_results():
             future_df = df[df.index.date > sel_date]
             if future_df.empty: continue
             
-            # 1日目（翌日終値）の更新 -> 5列目(E列)
+            # 1日目（翌日終値）の更新 -> 1列目(A列)
             first_day = future_df.iloc[0]
             close_1 = int(first_day['Close'])
             pct_1 = ((close_1 - selected_price) / selected_price) * 100
-            cell_list.extend([gspread.Cell(i+2, 5, close_1), gspread.Cell(i+3, 5, f"{pct_1:+.2f}%")])
+            cell_list.extend([gspread.Cell(i+2, 1, close_1), gspread.Cell(i+3, 1, f"{pct_1:+.2f}%")])
             
-            # 2日目〜14日目の更新（実質スプレッドシート上の3〜15営業日枠） -> 6列目(F列)〜18列目(R列)
-            # 枠が14個しかないため上限を14に制限（列ズレを防止）
+            # 2日目〜14日目の更新（3〜15営業日分） -> 2列目(B列)〜14列目(N列)
             for day_idx in range(1, min(len(future_df), 14)):
-                col = day_idx + 5
+                col = day_idx + 1  # 1列目(A列)始まりなのでインデックスに+1
                 close_curr = int(future_df.iloc[day_idx]['Close'])
                 close_prev = int(future_df.iloc[day_idx-1]['Close'])
                 pct_day = ((close_curr - close_prev) / close_prev) * 100
@@ -280,20 +280,20 @@ def record_to_spreadsheet():
     except Exception as e:
         print(f"シート1への追記エラー: {e}")
 
-    # シート2への書き込み（サンプル例の構成に完全準拠して追記）
+    # シート2への書き込み（A列開始構成に修正）
     try:
         if selected_stocks:
             sheet2 = connect_spreadsheet("シート2")
             new_rows_s2 = []
             for code, r in selected_stocks.items():
-                # 1行目: 日付, コード, 基準値, 空白, 翌日終値, 3〜15営業日, 右側枠見出し
-                row1 = [r["date"], code, r["price"], ""] + ["翌日終値"] + [f"{d}営業日" for d in range(3, 16)] + ["差額(対選定)", "判定(対選定)", "比率(%)"]
-                # 2行目: ステージ名、および未更新部分の初期値「判定」を14個配置、右側は空白（数式用）
-                row2 = ["通過条件ステージ", "12. 天井圏維持", "", ""] + ["判定"] * 14 + ["", "", ""]
-                # 3行目: PPPレーベル、および未更新部分の初期値「前日比(%)」を14個配置
-                row3 = ["PPP", r["ppp_label"].strip() or "通常", "", ""] + ["前日比(%)"] * 14 + ["", "", ""]
+                # 1行目: データ部分を左端(A列〜)から開始し、管理情報を右側(R〜T列)に配置
+                row1 = ["翌日終値"] + [f"{d}営業日" for d in range(3, 16)] + ["差額(対選定)", "判定(対選定)", "比率(%)"] + [r["date"], code, r["price"]]
+                # 2行目: A-N列に初期値「判定」、右側に「通過条件ステージ」「12. 天井圏維持」ラベル
+                row2 = ["判定"] * 14 + ["", "", ""] + ["通過条件ステージ", "12. 天井圏維持", ""]
+                # 3行目: A-N列に初期値「前日比(%)」、右側に「PPP」「通常 or ★PPP」ラベル
+                row3 = ["前日比(%)"] * 14 + ["", "", ""] + ["PPP", r["ppp_label"].strip() or "通常", ""]
                 # 4行目: 空白行（ブロック区切り用）
-                row4 = ["", "", "", ""]
+                row4 = [""]
                 
                 new_rows_s2.extend([row1, row2, row3, row4])
             
