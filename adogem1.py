@@ -223,13 +223,21 @@ def analyze_stock(symbol):
         return "SKIP"
         
     # 8. 上ヒゲクリア
-    upper = h.iloc[idx] - max(o.iloc[idx], c.iloc[idx])
-    body = abs(c.iloc[idx] - o.iloc[idx])
-    if body == 0 or (upper <= (body * 1.5)): 
-        stage_survivors["stage8"] += 1
-    else:
-        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "upper_shadow", "ppp_label": ppp_label, "date": data_date}
-        return "SKIP"
+    # --- 修正後の判定ロジック ---
+# 各要素の算出
+upper = h_s.iloc[idx] - max(o_s.iloc[idx], c_s.iloc[idx])
+lower = min(o_s.iloc[idx], c_s.iloc[idx]) - l_s.iloc[idx] # 下ヒゲを追加
+body = abs(c_s.iloc[idx] - o_s.iloc[idx])
+
+# 判定条件
+# 1. body == 0 (価格が変わらない足) は除外
+# 2. upper <= (body * 1.5) (上ヒゲが長すぎない)
+# 3. body > (upper + lower) (実体がヒゲの合計より長い = 十字線を排除)
+if body > 0 and (upper <= (body * 1.5)) and (body > (upper + lower)):
+    pass_counts[6] += 1
+else:
+    # ログ出力用処理（必要に応じて調整してください）
+    continue
         
     # 9. 天井圏MA100回避
     if (abs(c.iloc[idx] - ma100.iloc[idx]) / ma100.iloc[idx]) >= 0.03: 
