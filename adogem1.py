@@ -33,7 +33,7 @@ STAGE_LABELS = {
     "upper_shadow": "8.上ヒゲ",
     "ceiling_avoid": "9.天井回避",
     "new_high_pass": "10.新高値",
-    "positive_05_pass": "11.0.5%以上陽線", 
+    "positive_05_pass": "11.0.1%以上陽線", 
     "completed_pass": "完全合格"
 }
 
@@ -100,7 +100,7 @@ def update_yesterday_results():
             "8. 上ヒゲ": "upper_shadow",
             "9. 天井圏回避": "ceiling_avoid",
             "10. 新高値": "new_high_pass",
-            "11. 0.5%以上陽線": "positive_05_pass"
+            "11. 0.1%以上陽線": "positive_01_pass"
         }
         for i, row in enumerate(all_records):
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
@@ -239,11 +239,11 @@ def analyze_stock(symbol):
         sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "new_high_pass", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
         
-    # 新11. 0.5%以上陽線クリア (開始値より終値が0.5%以上高い場合のみ通過)
-    if o.iloc[idx] > 0 and ((c.iloc[idx] - o.iloc[idx]) / o.iloc[idx]) >= 0.005:
+    # 新11. 0.1%以上陽線クリア (開始値より終値が0.1%以上高い場合のみ通過)
+    if o.iloc[idx] > 0 and ((c.iloc[idx] - o.iloc[idx]) / o.iloc[idx]) >= 0.001:
         stage_survivors["stage11"] += 1
     else:
-        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "positive_05_pass", "ppp_label": ppp_label, "date": data_date}
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "positive_01_pass", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
         
     # 全ステージ完全合格の記録
@@ -264,8 +264,8 @@ def record_to_spreadsheet():
             "upper_shadow": "8. 上ヒゲ",
             "ceiling_avoid": "9. 天井圏回避",
             "new_high_pass": "10. 新高値",
-            "positive_05_pass": "11. 0.5%以上陽線",
-            "completed_pass": "11. 0.5%以上陽線"
+            "positive_05_pass": "11. 0.1%以上陽線",
+            "completed_pass": "11. 0.1%以上陽線"
         }
         new_rows_s1 = [[r["date"], code, stage_map[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in stage_map]
         if new_rows_s1: 
@@ -327,7 +327,7 @@ def main():
         f"8.上ヒゲ: {stage_survivors['stage8']}\n"
         f"9.天井回避: {stage_survivors['stage9']}\n"
         f"10.新高値: {stage_survivors['stage10']}\n"
-        f"11.0.5%以上陽線: {stage_survivors['stage11']}"
+        f"11.0.1%以上陽線: {stage_survivors['stage11']}"
     )
     
     judgement_lines = ["【本日確定の判定結果】"]
@@ -370,7 +370,7 @@ def main():
 8. 上ヒゲクリア
 9. 天井圏回避 MA100>3%
 10. 新高値更新 >MA5
-11. 0.5%以上陽線 ((終値 - 開始値) / 開始値 >= 0.5%)
+11. 0.1%<陽線 終値-開始値>= 0.1%
 
 【判定結果マーク基準】翌日終値
  ◎ ： +2.0%以上
