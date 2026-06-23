@@ -14,7 +14,7 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 # --- グローバル変数 ---
-stage_survivors = {f"stage{i}": 0 for i in range(1, 13)}
+stage_survivors = {f"stage{i}": 0 for i in range(1, 12)}  
 stats = {"★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0}
 sheet1_final_log = {}
 selected_stocks = {}
@@ -24,8 +24,7 @@ stage_results_report = {
     "upper_shadow": [],
     "ceiling_avoid": [],
     "new_high_pass": [],
-    "weekly_ma_pass": [],
-    "monthly_high_pass": [],
+    "positive_05_pass": [],  # 0.5%以上陽線用
     "completed_pass": []
 }
 
@@ -34,8 +33,7 @@ STAGE_LABELS = {
     "upper_shadow": "8.上ヒゲ",
     "ceiling_avoid": "9.天井回避",
     "new_high_pass": "10.新高値",
-    "weekly_ma_pass": "11.週足60",
-    "monthly_high_pass": "12.天井維持",
+    "positive_05_pass": "11.0.5%以上陽線", 
     "completed_pass": "完全合格"
 }
 
@@ -102,8 +100,7 @@ def update_yesterday_results():
             "8. 上ヒゲ": "upper_shadow",
             "9. 天井圏回避": "ceiling_avoid",
             "10. 新高値": "new_high_pass",
-            "11. 週足60": "weekly_ma_pass",
-            "12. 天井圏維持": "monthly_high_pass"
+            "11. 0.5%以上陽線": "positive_05_pass"
         }
         for i, row in enumerate(all_records):
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
@@ -121,7 +118,7 @@ def update_yesterday_results():
                 cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
                 
                 s_key = reverse_stage_map.get(stage_name, "completed_pass")
-                if stage_name == "12. 天井圏維持" and row[3] != "通常": 
+                if stage_name == "11. 0.5%以上陽線" and row[3] != "通常": 
                     s_key = "completed_pass"
                 
                 result_line = f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
@@ -136,7 +133,6 @@ def update_sheet2_results():
         cell_list = []
         for i in range(0, len(all_records), 4):
             if i >= len(all_records) or len(all_records[i]) < 20: continue
-            # A列開始に伴い、右側に移動した「選定日付(R列:18番目)」「コード(S列:19番目)」「選定株価(T列:20番目)」から情報を読み込む
             data_date_str, code = all_records[i][17], all_records[i][18]
             if not code or data_date_str == "選定日付": continue
             try: 
@@ -148,15 +144,15 @@ def update_sheet2_results():
             future_df = df[df.index.date > sel_date]
             if future_df.empty: continue
             
-            # 1日目（翌日終値）の更新 -> 1列目(A列)
+            # 1日目（翌日終値）の更新
             first_day = future_df.iloc[0]
             close_1 = int(first_day['Close'])
             pct_1 = ((close_1 - selected_price) / selected_price) * 100
             cell_list.extend([gspread.Cell(i+2, 1, close_1), gspread.Cell(i+3, 1, f"{pct_1:+.2f}%")])
             
-            # 2日目〜14日目の更新（3〜15営業日分） -> 2列目(B列)〜14列目(N列)
+            # 2日目〜14日目の更新（3〜15営業日分）
             for day_idx in range(1, min(len(future_df), 14)):
-                col = day_idx + 1  # 1列目(A列)始まりなのでインデックスに+1
+                col = day_idx + 1
                 close_curr = int(future_df.iloc[day_idx]['Close'])
                 close_prev = int(future_df.iloc[day_idx-1]['Close'])
                 pct_day = ((close_curr - close_prev) / close_prev) * 100
@@ -180,8 +176,6 @@ def analyze_stock(symbol):
     ma60 = c.rolling(60).mean()
     ma100 = c.rolling(100).mean()
     ma300 = c.rolling(300).mean()
-    ma24_m = c.rolling(24*20).mean() 
-    ma60_w = c.rolling(60*5).mean()
 
     # 1. データ取得成功
     stage_survivors["stage1"] += 1
@@ -245,18 +239,11 @@ def analyze_stock(symbol):
         sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "new_high_pass", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
         
-    # 11. 週足MA60クリア
-    if c.iloc[idx] > ma60_w.iloc[idx]: 
+    # 新11. 0.5%以上陽線クリア (開始値より終値が0.5%以上高い場合のみ通過)
+    if o.iloc[idx] > 0 and ((c.iloc[idx] - o.iloc[idx]) / o.iloc[idx]) >= 0.005:
         stage_survivors["stage11"] += 1
     else:
-        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "weekly_ma_pass", "ppp_label": ppp_label, "date": data_date}
-        return "SKIP"
-        
-    # 12. 天井圏維持
-    if (c.iloc[idx] / ma24_m.iloc[idx] <= 1.2):
-        stage_survivors["stage12"] += 1
-    else:
-        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "monthly_high_pass", "ppp_label": ppp_label, "date": data_date}
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "positive_05_pass", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
         
     # 全ステージ完全合格の記録
@@ -270,29 +257,31 @@ def analyze_stock(symbol):
 
 # --- スプレッドシート記録 ---
 def record_to_spreadsheet():
-    # シート1への書き込み（判定待ちとして追記）
     try:
         sheet1 = connect_spreadsheet("シート1")
-        new_rows_s1 = [[r["date"], code, {"trend_align":"7. 長トレンド","upper_shadow":"8. 上ヒゲ","ceiling_avoid":"9. 天井圏回避","new_high_pass":"10. 新高値","weekly_ma_pass":"11. 週足60","monthly_high_pass":"12. 天井圏維持","completed_pass":"12. 天井圏維持"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in ["trend_align", "upper_shadow", "ceiling_avoid", "new_high_pass", "weekly_ma_pass", "monthly_high_pass", "completed_pass"]]
+        stage_map = {
+            "trend_align": "7. 長トレンド",
+            "upper_shadow": "8. 上ヒゲ",
+            "ceiling_avoid": "9. 天井圏回避",
+            "new_high_pass": "10. 新高値",
+            "positive_05_pass": "11. 0.5%以上陽線",
+            "completed_pass": "11. 0.5%以上陽線"
+        }
+        new_rows_s1 = [[r["date"], code, stage_map[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in stage_map]
         if new_rows_s1: 
             sheet1.append_rows(new_rows_s1, value_input_option='RAW')
             print(f"シート1に当日のスキャン結果を {len(new_rows_s1)} 件（判定待ち）追記しました。")
     except Exception as e:
         print(f"シート1への追記エラー: {e}")
 
-    # シート2への書き込み（A列開始構成に修正）
     try:
         if selected_stocks:
             sheet2 = connect_spreadsheet("シート2")
             new_rows_s2 = []
             for code, r in selected_stocks.items():
-                # 1行目: データ部分を左端(A列〜)から開始し、管理情報を右側(R〜T列)に配置
                 row1 = ["翌日終値"] + [f"{d}営業日" for d in range(3, 16)] + ["差額(対選定)", "判定(対選定)", "比率(%)"] + [r["date"], code, r["price"]]
-                # 2行目: A-N列に初期値「判定」、右側に「通過条件ステージ」「12. 天井圏維持」ラベル
-                row2 = ["判定"] * 14 + ["", "", ""] + ["通過条件ステージ", "12. 天井圏維持", ""]
-                # 3行目: A-N列に初期値「前日比(%)」、右側に「PPP」「通常 or ★PPP」ラベル
+                row2 = ["判定"] * 14 + ["", "", ""] + ["通過条件ステージ", "11. 0.5%以上陽線", ""]
                 row3 = ["前日比(%)"] * 14 + ["", "", ""] + ["PPP", r["ppp_label"].strip() or "通常", ""]
-                # 4行目: 空白行（ブロック区切り用）
                 row4 = [""]
                 
                 new_rows_s2.extend([row1, row2, row3, row4])
@@ -338,8 +327,7 @@ def main():
         f"8.上ヒゲ: {stage_survivors['stage8']}\n"
         f"9.天井回避: {stage_survivors['stage9']}\n"
         f"10.新高値: {stage_survivors['stage10']}\n"
-        f"11.週足60: {stage_survivors['stage11']}\n"
-        f"12.天井維持: {stage_survivors['stage12']}"
+        f"11.0.5%以上陽線: {stage_survivors['stage11']}"
     )
     
     judgement_lines = ["【本日確定の判定結果】"]
@@ -349,8 +337,7 @@ def main():
         "upper_shadow": stage_survivors['stage8'],
         "ceiling_avoid": stage_survivors['stage9'],
         "new_high_pass": stage_survivors['stage10'],
-        "weekly_ma_pass": stage_survivors['stage11'],
-        "monthly_high_pass": stage_survivors['stage12'],
+        "positive_05_pass": stage_survivors['stage11'],
         "completed_pass": len(final_list)
     }
 
@@ -383,8 +370,7 @@ def main():
 8. 上ヒゲクリア
 9. 天井圏回避 MA100>3%
 10. 新高値更新 >MA5
-11. 週足60クリア >MA60w
-12. 天井圏維持 MA25M<1.2倍
+11. 0.5%以上陽線 ((終値 - 開始値) / 開始値 >= 0.5%)
 
 【判定結果マーク基準】翌日終値
  ◎ ： +2.0%以上
