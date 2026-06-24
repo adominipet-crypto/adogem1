@@ -24,16 +24,16 @@ stage_results_report = {
     "upper_shadow": [],
     "ceiling_avoid": [],
     "new_high_pass": [],
-    "positive_05_pass": [],  # 0.5%以上陽線用
+    "positive_01_pass": [],  # 0.1%以上陽線用に統一
     "completed_pass": []
 }
 
 STAGE_LABELS = {
     "trend_align": "7.長トレンド",
     "upper_shadow": "8.上ヒゲ",
-    "ceiling_avoid": "9.天井回避",
+    "ceiling_avoid": "9.天井回避(現在スルー中)",
     "new_high_pass": "10.新高値",
-    "positive_05_pass": "11.0.1%以上陽線", 
+    "positive_01_pass": "11.0.1%以上陽線", 
     "completed_pass": "完全合格"
 }
 
@@ -118,7 +118,7 @@ def update_yesterday_results():
                 cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
                 
                 s_key = reverse_stage_map.get(stage_name, "completed_pass")
-                if stage_name == "11. 0.5%以上陽線" and row[3] != "通常": 
+                if stage_name == "11. 0.1%以上陽線" and row[3] != "通常": 
                     s_key = "completed_pass"
                 
                 result_line = f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
@@ -225,8 +225,8 @@ def analyze_stock(symbol):
         sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "upper_shadow", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
         
-    # 9. 天井圏MA100回避
-    if (abs(c.iloc[idx] - ma100.iloc[idx]) / ma100.iloc[idx]) >= 0.03: 
+    # 9. 天井圏MA100回避【★一時的に無条件スルー記号（True or）を追加】
+    if True or (abs(c.iloc[idx] - ma100.iloc[idx]) / ma100.iloc[idx]) >= 0.03: 
         stage_survivors["stage9"] += 1
     else:
         sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "ceiling_avoid", "ppp_label": ppp_label, "date": data_date}
@@ -262,9 +262,9 @@ def record_to_spreadsheet():
         stage_map = {
             "trend_align": "7. 長トレンド",
             "upper_shadow": "8. 上ヒゲ",
-            "ceiling_avoid": "9. 天井圏回避　現在スキップ",
+            "ceiling_avoid": "9. 天井圏回避 現在スキップ",
             "new_high_pass": "10. 新高値",
-            "positive_05_pass": "11. 0.1%以上陽線",
+            "positive_01_pass": "11. 0.1%以上陽線",
             "completed_pass": "11. 0.1%以上陽線"
         }
         new_rows_s1 = [[r["date"], code, stage_map[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in stage_map]
@@ -280,7 +280,7 @@ def record_to_spreadsheet():
             new_rows_s2 = []
             for code, r in selected_stocks.items():
                 row1 = ["翌日終値"] + [f"{d}営業日" for d in range(3, 16)] + ["差額(対選定)", "判定(対選定)", "比率(%)"] + [r["date"], code, r["price"]]
-                row2 = ["判定"] * 14 + ["", "", ""] + ["通過条件ステージ", "11. 0.5%以上陽線", ""]
+                row2 = ["判定"] * 14 + ["", "", ""] + ["通過条件ステージ", "11. 0.1%以上陽線", ""]
                 row3 = ["前日比(%)"] * 14 + ["", "", ""] + ["PPP", r["ppp_label"].strip() or "通常", ""]
                 row4 = [""]
                 
@@ -325,7 +325,7 @@ def main():
         f"6.右肩: {stage_survivors['stage6']}\n"
         f"7.長期T: {stage_survivors['stage7']}\n"
         f"8.上ヒゲ: {stage_survivors['stage8']}\n"
-        f"9.天井回避: {stage_survivors['stage9']}\n"
+        f"9.天井回避: {stage_survivors['stage9']} (※スルー適用中)\n"
         f"10.新高値: {stage_survivors['stage10']}\n"
         f"11.0.1%以上陽線: {stage_survivors['stage11']}"
     )
@@ -337,7 +337,7 @@ def main():
         "upper_shadow": stage_survivors['stage8'],
         "ceiling_avoid": stage_survivors['stage9'],
         "new_high_pass": stage_survivors['stage10'],
-        "positive_05_pass": stage_survivors['stage11'],
+        "positive_01_pass": stage_survivors['stage11'],
         "completed_pass": len(final_list)
     }
 
@@ -368,9 +368,9 @@ def main():
 6. 右肩上がり >MA60
 7. 長期トレンド MA100>前日
 8. 上ヒゲクリア
-9. 天井圏回避 MA100>3%
+9. 天井圏回避 (★一時的スルー無効化中)
 10. 新高値更新 >MA5
-11. 0.1%<陽線 終値-開始値>= 0.1%
+11. 0.1%以上陽線 ((終値 - 開始値) / 開始値 >= 0.1%)
 
 【判定結果マーク基準】翌日終値
  ◎ ： +2.0%以上
@@ -405,3 +405,5 @@ def main():
     except Exception as e:
         print(f"メール送信エラー: {e}")
 
+if __name__ == "__main__": 
+    main()
