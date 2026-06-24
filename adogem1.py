@@ -262,7 +262,7 @@ def record_to_spreadsheet():
         stage_map = {
             "trend_align": "7. 長トレンド",
             "upper_shadow": "8. 上ヒゲ",
-            "ceiling_avoid": "9. 天井圏回避",
+            "ceiling_avoid": "9. 天井圏回避　現在スキップ",
             "new_high_pass": "10. 新高値",
             "positive_05_pass": "11. 0.1%以上陽線",
             "completed_pass": "11. 0.1%以上陽線"
@@ -405,5 +405,3 @@ def main():
     except Exception as e:
         print(f"メール送信エラー: {e}")
 
-if __name__ == "__main__": 
-    main()
