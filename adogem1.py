@@ -88,6 +88,36 @@ def get_next_trading_day_data(symbol, base_date):
         return future_df.iloc[0] if not future_df.empty else None
     except: return None
 
+# --- 日経平均の判定行を自動作成する関数 ---
+def get_nikkei_evaluation_line():
+    try:
+        # 判定のために直近の日付データを取得
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/^N225?range=1mo&interval=1d&nocache={int(time.time())}"
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        if res.status_code != 200: return "【日経平均の判定】\n  データ取得エラー"
+        
+        result = res.json().get("chart", {}).get("result", [])
+        if not result: return "【日経平均の判定】\n  データ空エラー"
+        
+        quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
+        timestamps = result[0].get("timestamp", [])
+        
+        df = pd.DataFrame({"Close": quotes.get("close", [])}, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
+        df = df.dropna().sort_index()
+        
+        if len(df) < 2: return "【日経平均の判定】\n  判定データ不足"
+        
+        prev_close = df.iloc[-2]['Close']  # 1営業日前（基準日）の終値
+        curr_close = df.iloc[-1]['Close']  # 当日（最新）の終値
+        prev_date_str = df.index[-2].strftime("%m-%d")
+        
+        pct = ((curr_close - prev_close) / prev_close) * 100
+        mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
+        
+        return f"【日経平均の判定】\n  {mark} | NIKKEI225 | {int(prev_close)}円 ({prev_date_str}) → 1営業日 | {int(curr_close)}円 ({pct:+.2f}%)"
+    except Exception as e:
+        return f"【日経平均の判定】\n  自動取得エラー: {e}"
+
 # --- 判定処理 (前日分の自動答え合わせ) ---
 def update_yesterday_results():
     global stage_results_report
@@ -330,6 +360,9 @@ def main():
         f"11.0.1%以上陽線: {stage_survivors['stage11']}"
     )
     
+    # 日経平均の評価文字列を取得
+    nikkei_block = get_nikkei_evaluation_line()
+    
     judgement_lines = ["【本日確定の判定結果】"]
     has_any_result = False
     stage_count_map = {
@@ -387,6 +420,7 @@ def main():
         f"【完全合格一覧】\n"
         f"{final_list_str}\n\n"
         f"==================================================\n"
+        f"{nikkei_block}\n\n"  # 【本日確定の判定結果】の真上に追加
         f"{judgement_block}"
         f"{condition_text}"
     )
