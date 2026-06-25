@@ -52,7 +52,11 @@ def fetch_global_latest_date():
         while target.weekday() >= 5: target -= datetime.timedelta(days=1)
         GLOBAL_LATEST_DATE = target
 
-def connect_spreadsheet(sheet_name="シート1"):
+def connect_spreadsheet(sheet_name=None):
+    """
+    指定された名前のシートに接続。
+    sheet_name が None の場合は、GLOBAL_LATEST_DATE から「X月」シートを動的に決定・自動作成する。
+    """
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     gcp_key = os.environ.get('GCP_SA_KEY')
     if not gcp_key:
@@ -63,7 +67,23 @@ def connect_spreadsheet(sheet_name="シート1"):
     else:
         creds = Credentials.from_service_account_file(gcp_key, scopes=scopes)
         
-    return gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ").worksheet(sheet_name)
+    spreadsheet = gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ")
+    
+    # シート名が指定されていない場合は当月の「X月」にする
+    if sheet_name is None:
+        target_date = GLOBAL_LATEST_DATE if GLOBAL_LATEST_DATE else datetime.date.today()
+        sheet_name = f"{target_date.month}月"
+        
+    try:
+        return spreadsheet.worksheet(sheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        # 月が替わり、シートが存在しない場合は新規作成する
+        print(f"シート「{sheet_name}」が見つからないため、新規作成します。")
+        new_sheet = spreadsheet.add_worksheet(title=sheet_name, rows="1000", cols="20")
+        # 1行目にヘッダーを書き込み
+        headers = ["選定日付", "コード", "通過条件ステージ", "PPP", "選定時株価", "翌日終値", "判定", "比率(%)"]
+        new_sheet.append_row(headers, value_input_option='RAW')
+        return new_sheet
 
 def get_stock_data_fallback(symbol, force_check_date=True):
     try:
@@ -91,7 +111,6 @@ def get_next_trading_day_data(symbol, base_date):
 # --- 日経平均の判定行を自動作成する関数 ---
 def get_nikkei_evaluation_line():
     try:
-        # 判定のために直近の日付データを取得
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/^N225?range=1mo&interval=1d&nocache={int(time.time())}"
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
         if res.status_code != 200: return "【日経平均の判定】\n  データ取得エラー"
@@ -107,8 +126,8 @@ def get_nikkei_evaluation_line():
         
         if len(df) < 2: return "【日経平均の判定】\n  判定データ不足"
         
-        prev_close = df.iloc[-2]['Close']  # 1営業日前（基準日）の終値
-        curr_close = df.iloc[-1]['Close']  # 当日（最新）の終値
+        prev_close = df.iloc[-2]['Close']  
+        curr_close = df.iloc[-1]['Close']  
         prev_date_str = df.index[-2].strftime("%m-%d")
         
         pct = ((curr_close - prev_close) / prev_close) * 100
@@ -122,13 +141,14 @@ def get_nikkei_evaluation_line():
 def update_yesterday_results():
     global stage_results_report
     try:
-        sheet = connect_spreadsheet("シート1")
+        # 引数なしで呼び出すことで、自動的に当月の「X月」シートに接続します
+        sheet = connect_spreadsheet()
         all_records = sheet.get_all_values()
         cell_list = []
         reverse_stage_map = {
             "7. 長トレンド": "trend_align",
             "8. 上ヒゲ": "upper_shadow",
-            "9. 天井圏回避": "ceiling_avoid",
+            "9. 天井圏回避 現在スキップ": "ceiling_avoid",
             "10. 新高値": "new_high_pass",
             "11. 0.1%以上陽線": "positive_01_pass"
         }
@@ -154,41 +174,11 @@ def update_yesterday_results():
                 result_line = f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
                 stage_results_report[s_key].append(result_line)
         if cell_list: sheet.update_cells(cell_list)
-    except Exception as e: print(f"Sheet1判定エラー: {e}")
+    except Exception as e: print(f"当月シート判定エラー: {e}")
 
 def update_sheet2_results():
-    try:
-        sheet2 = connect_spreadsheet("シート2")
-        all_records = sheet2.get_all_values()
-        cell_list = []
-        for i in range(0, len(all_records), 4):
-            if i >= len(all_records) or len(all_records[i]) < 20: continue
-            data_date_str, code = all_records[i][17], all_records[i][18]
-            if not code or data_date_str == "選定日付": continue
-            try: 
-                selected_price = int(all_records[i][19])
-                sel_date = datetime.datetime.strptime(data_date_str, "%Y-%m-%d").date()
-            except: continue
-            df = get_stock_data_fallback(code, force_check_date=False)
-            if df is None: continue
-            future_df = df[df.index.date > sel_date]
-            if future_df.empty: continue
-            
-            # 1日目（翌日終値）の更新
-            first_day = future_df.iloc[0]
-            close_1 = int(first_day['Close'])
-            pct_1 = ((close_1 - selected_price) / selected_price) * 100
-            cell_list.extend([gspread.Cell(i+2, 1, close_1), gspread.Cell(i+3, 1, f"{pct_1:+.2f}%")])
-            
-            # 2日目〜14日目の更新（3〜15営業日分）
-            for day_idx in range(1, min(len(future_df), 14)):
-                col = day_idx + 1
-                close_curr = int(future_df.iloc[day_idx]['Close'])
-                close_prev = int(future_df.iloc[day_idx-1]['Close'])
-                pct_day = ((close_curr - close_prev) / close_prev) * 100
-                cell_list.extend([gspread.Cell(i+2, col, close_curr), gspread.Cell(i+3, col, f"{pct_day:+.2f}%")])
-        if cell_list: sheet2.update_cells(cell_list, value_input_option='RAW')
-    except Exception as e: print(f"Sheet2更新エラー: {e}")
+    # 【休止中】シート2の自動更新処理をスキップします
+    pass
 
 # --- 株価選定ロジック ---
 def analyze_stock(symbol):
@@ -288,7 +278,8 @@ def analyze_stock(symbol):
 # --- スプレッドシート記録 ---
 def record_to_spreadsheet():
     try:
-        sheet1 = connect_spreadsheet("シート1")
+        # 当月の「X月」シートを自動取得・作成して書き込み
+        sheet_current_month = connect_spreadsheet()
         stage_map = {
             "trend_align": "7. 長トレンド",
             "upper_shadow": "8. 上ヒゲ",
@@ -299,28 +290,18 @@ def record_to_spreadsheet():
         }
         new_rows_s1 = [[r["date"], code, stage_map[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in stage_map]
         if new_rows_s1: 
-            sheet1.append_rows(new_rows_s1, value_input_option='RAW')
-            print(f"シート1に当日のスキャン結果を {len(new_rows_s1)} 件（判定待ち）追記しました。")
+            sheet_current_month.append_rows(new_rows_s1, value_input_option='RAW')
+            print(f"当月シートに当日のスキャン結果を {len(new_rows_s1)} 件（判定待ち）追記しました。")
     except Exception as e:
-        print(f"シート1への追記エラー: {e}")
+        print(f"当月シートへの追記エラー: {e}")
 
-    try:
-        if selected_stocks:
-            sheet2 = connect_spreadsheet("シート2")
-            new_rows_s2 = []
-            for code, r in selected_stocks.items():
-                row1 = ["翌日終値"] + [f"{d}営業日" for d in range(3, 16)] + ["差額(対選定)", "判定(対選定)", "比率(%)"] + [r["date"], code, r["price"]]
-                row2 = ["判定"] * 14 + ["", "", ""] + ["通過条件ステージ", "11. 0.1%以上陽線", ""]
-                row3 = ["前日比(%)"] * 14 + ["", "", ""] + ["PPP", r["ppp_label"].strip() or "通常", ""]
-                row4 = [""]
-                
-                new_rows_s2.extend([row1, row2, row3, row4])
-            
-            if new_rows_s2:
-                sheet2.append_rows(new_rows_s2, value_input_option='RAW')
-                print(f"シート2に完全合格銘柄を {len(selected_stocks)} 件追記しました。")
-    except Exception as e:
-        print(f"シート2への追記エラー: {e}")
+    # --- 【休止中】旧シート2への追加処理は停止しています ---
+    # try:
+    #     if selected_stocks:
+    #         sheet2 = connect_spreadsheet("シート2")
+    #         ...
+    # except Exception as e:
+    #     print(f"シート2への追記エラー: {e}")
 
 # --- メイン処理 ---
 def main():
@@ -328,7 +309,7 @@ def main():
     
     # 1. 過去データの自動答え合わせ実行
     update_yesterday_results()
-    update_sheet2_results()
+    update_sheet2_results()  # 現在内部処理はpass(休止)
     
     # 2. 当日の全銘柄スクリーニング
     start_r, end_r = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
@@ -420,7 +401,7 @@ def main():
         f"【完全合格一覧】\n"
         f"{final_list_str}\n\n"
         f"==================================================\n"
-        f"{nikkei_block}\n\n"  # 【本日確定の判定結果】の真上に追加
+        f"{nikkei_block}\n\n"  
         f"{judgement_block}"
         f"{condition_text}"
     )
