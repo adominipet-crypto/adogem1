@@ -14,14 +14,14 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 # --- グローバル変数 ---
-# 1〜8の8ステージ構成に変更
-stage_survivors = {f"stage{i}": 0 for i in range(1, 9)}  
+# 1〜9の9ステージ構成に変更
+stage_survivors = {f"stage{i}": 0 for i in range(1, 10)}  
 stats = {"★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0}
 sheet1_final_log = {}
 selected_stocks = {}
 GLOBAL_LATEST_DATE = None  
 
-# ステージ5〜7および完全合格の答え合わせ用レポート構造
+# ステージ6〜8および完全合格の答え合わせ用レポート構造
 stage_results_report = {
     "tame_pass": [],
     "right_shoulder_pass": [],
@@ -30,9 +30,9 @@ stage_results_report = {
 }
 
 STAGE_LABELS = {
-    "tame_pass": "5.溜め",
-    "right_shoulder_pass": "6.右肩上がり",
-    "trend_align": "7.長期トレンド",
+    "tame_pass": "6.溜め",
+    "right_shoulder_pass": "7.右肩上がり",
+    "trend_align": "8.長期トレンド",
     "completed_pass": "完全合格"
 }
 
@@ -137,9 +137,9 @@ def update_yesterday_results():
         all_records = sheet.get_all_values()
         cell_list = []
         reverse_stage_map = {
-            "5. 溜め": "tame_pass",
-            "6. 右肩上がり": "right_shoulder_pass",
-            "7. 長期トレンド": "trend_align"
+            "6. 溜め": "tame_pass",
+            "7. 右肩上がり": "right_shoulder_pass",
+            "8. 長期トレンド": "trend_align"
         }
         for i, row in enumerate(all_records):
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
@@ -157,7 +157,7 @@ def update_yesterday_results():
                 cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
                 
                 s_key = reverse_stage_map.get(stage_name, "completed_pass")
-                if stage_name == "7. 長期トレンド" and row[3] != "通常": 
+                if stage_name == "8. 長期トレンド" and row[3] != "通常": 
                     s_key = "completed_pass"
                 
                 result_line = f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
@@ -204,47 +204,50 @@ def analyze_stock(symbol):
         stage_survivors["stage4"] += 1
     else: return "SKIP"
     
-    # ※. MA20上抜け後7日以内
+    # 5. MA20上抜け後7日以内
     cross_check = False
     for i in range(idx - 6, idx + 1):
         if i >= 1 and c.iloc[i] > ma20.iloc[i] and c.iloc[i-1] <= ma20.iloc[i-1]:
             cross_check = True
             break
-    if not cross_check: return "SKIP"
+    if cross_check:
+        stage_survivors["stage5"] += 1
+    else: 
+        return "SKIP"
 
     # PPP判定用レーベル作成
     ppp_label = "★PPP " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0)) else ("★PPP(Short) " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx]) else "")
     data_date = df.index[idx].strftime("%Y-%m-%d")
     
-    # 5. 溜め(前日終値<MA5)
+    # 6. 溜め(前日終値<MA5)
     if c.iloc[prev_idx] < ma5.iloc[prev_idx]: 
-        stage_survivors["stage5"] += 1
+        stage_survivors["stage6"] += 1
     else:
-        # ステージ5の条件不合格：ここからシート書き込み対象(5. 溜めとして記録)
+        # ステージ6の条件不合格：ここからシート書き込み対象(6. 溜めとして記録)
         sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "tame_pass", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
     
-    # 6. 右肩上がり(MA60)
+    # 7. 右肩上がり(MA60)
     if ma60.iloc[idx] > ma60.iloc[prev_idx]: 
-        stage_survivors["stage6"] += 1
+        stage_survivors["stage7"] += 1
     else:
-        # ステージ6の条件不合格：(6. 右肩上がりとして記録)
+        # ステージ7の条件不合格：(7. 右肩上がりとして記録)
         sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "right_shoulder_pass", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
         
-    # 7. 長期トレンド(MA100上昇)
+    # 8. 長期トレンド(MA100上昇)
     if ma100.iloc[idx] > ma100.iloc[prev_idx]: 
-        stage_survivors["stage7"] += 1
+        stage_survivors["stage8"] += 1
     else:
-        # ステージ7の条件不合格：(7. 長期トレンドとして記録)
+        # ステージ8の条件不合格：(8. 長期トレンドとして記録)
         sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
         
-    # 8. 当日陽線(始値<終値)
+    # 9. 当日陽線(始値<終値)
     if o.iloc[idx] < c.iloc[idx]:
-        stage_survivors["stage8"] += 1
+        stage_survivors["stage9"] += 1
     else:
-        # ステージ8の条件不合格：(7. 長期トレンドとして記録)
+        # ステージ9の条件不合格：(8. 長期トレンドとして記録)
         sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
 
@@ -262,10 +265,10 @@ def record_to_spreadsheet():
     try:
         sheet_current_month = connect_spreadsheet()
         stage_map = {
-            "tame_pass": "5. 溜め",
-            "right_shoulder_pass": "6. 右肩上がり",
-            "trend_align": "7. 長期トレンド",
-            "completed_pass": "7. 長期トレンド"
+            "tame_pass": "6. 溜め",
+            "right_shoulder_pass": "7. 右肩上がり",
+            "trend_align": "8. 長期トレンド",
+            "completed_pass": "8. 長期トレンド"
         }
         new_rows_s1 = [[r["date"], code, stage_map[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in stage_map]
         if new_rows_s1: 
@@ -303,10 +306,11 @@ def main():
         f"2.月足60: {stage_survivors['stage2']}\n"
         f"3.出来高: {stage_survivors['stage3']}\n"
         f"4.下半身: {stage_survivors['stage4']}\n"
-        f"5.溜め: {stage_survivors['stage5']}\n"
-        f"6.右肩: {stage_survivors['stage6']}\n"
-        f"7.長期T: {stage_survivors['stage7']}\n"
-        f"8.当日陽線: {stage_survivors['stage8']}"
+        f"5.MA20上抜け: {stage_survivors['stage5']}\n"
+        f"6.溜め: {stage_survivors['stage6']}\n"
+        f"7.右肩: {stage_survivors['stage7']}\n"
+        f"8.長期T: {stage_survivors['stage8']}\n"
+        f"9.当日陽線: {stage_survivors['stage9']}"
     )
     
     nikkei_block = get_nikkei_evaluation_line()
@@ -314,9 +318,9 @@ def main():
     judgement_lines = ["【本日確定の判定結果】"]
     has_any_result = False
     stage_count_map = {
-        "tame_pass": stage_survivors['stage5'],
-        "right_shoulder_pass": stage_survivors['stage6'],
-        "trend_align": stage_survivors['stage7'],
+        "tame_pass": stage_survivors['stage6'],
+        "right_shoulder_pass": stage_survivors['stage7'],
+        "trend_align": stage_survivors['stage8'],
         "completed_pass": len(final_list)
     }
 
@@ -343,11 +347,11 @@ def main():
 2. 月足MA60上抜け
 3. 出来高5万株以上
 4. 下半身(終値>MA5)
-※. MA20上抜け後7日以内
-5. 溜め(前日終値<MA5)
-6. 右肩上がり(MA60)
-7. 長期トレンド(MA100上昇)
-8. 当日陽線(始値<終値)
+5. MA20上抜け後7日以内
+6. 溜め(前日終値<MA5)
+7. 右肩上がり(MA60)
+8. 長期トレンド(MA100上昇)
+9. 当日陽線(始値<終値)
 
 【判定結果マーク基準】翌日終値
  ◎ ： +2.0%以上
