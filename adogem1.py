@@ -14,26 +14,25 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 # --- グローバル変数 ---
-stage_survivors = {f"stage{i}": 0 for i in range(1, 12)}  
+# 1〜7の7ステージ構成に変更
+stage_survivors = {f"stage{i}": 0 for i in range(1, 8)}  
 stats = {"★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0}
 sheet1_final_log = {}
 selected_stocks = {}
 GLOBAL_LATEST_DATE = None  
+
+# ステージ5〜7および完全合格の答え合わせ用レポート構造
 stage_results_report = {
+    "tame_pass": [],
+    "right_shoulder_pass": [],
     "trend_align": [],
-    "upper_shadow": [],
-    "ceiling_avoid": [],
-    "new_high_pass": [],
-    "positive_01_pass": [],  # 0.1%以上陽線用に統一
     "completed_pass": []
 }
 
 STAGE_LABELS = {
-    "trend_align": "7.長トレンド",
-    "upper_shadow": "8.上ヒゲ",
-    "ceiling_avoid": "9.天井回避(現在スルー中)",
-    "new_high_pass": "10.新高値",
-    "positive_01_pass": "11.0.1%以上陽線", 
+    "tame_pass": "5.溜め",
+    "right_shoulder_pass": "6.右肩上がり",
+    "trend_align": "7.長期トレンド",
     "completed_pass": "完全合格"
 }
 
@@ -53,10 +52,6 @@ def fetch_global_latest_date():
         GLOBAL_LATEST_DATE = target
 
 def connect_spreadsheet(sheet_name=None):
-    """
-    指定された名前のシートに接続。
-    sheet_name が None の場合は、GLOBAL_LATEST_DATE から「X月」シートを動的に決定・自動作成する。
-    """
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     gcp_key = os.environ.get('GCP_SA_KEY')
     if not gcp_key:
@@ -69,7 +64,6 @@ def connect_spreadsheet(sheet_name=None):
         
     spreadsheet = gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ")
     
-    # シート名が指定されていない場合は当月の「X月」にする
     if sheet_name is None:
         target_date = GLOBAL_LATEST_DATE if GLOBAL_LATEST_DATE else datetime.date.today()
         sheet_name = f"{target_date.month}月"
@@ -77,10 +71,8 @@ def connect_spreadsheet(sheet_name=None):
     try:
         return spreadsheet.worksheet(sheet_name)
     except gspread.exceptions.WorksheetNotFound:
-        # 月が替わり、シートが存在しない場合は新規作成する
         print(f"シート「{sheet_name}」が見つからないため、新規作成します。")
         new_sheet = spreadsheet.add_worksheet(title=sheet_name, rows="1000", cols="20")
-        # 1行目にヘッダーを書き込み
         headers = ["選定日付", "コード", "通過条件ステージ", "PPP", "選定時株価", "翌日終値", "判定", "比率(%)"]
         new_sheet.append_row(headers, value_input_option='RAW')
         return new_sheet
@@ -141,16 +133,13 @@ def get_nikkei_evaluation_line():
 def update_yesterday_results():
     global stage_results_report
     try:
-        # 引数なしで呼び出すことで、自動的に当月の「X月」シートに接続します
         sheet = connect_spreadsheet()
         all_records = sheet.get_all_values()
         cell_list = []
         reverse_stage_map = {
-            "7. 長トレンド": "trend_align",
-            "8. 上ヒゲ": "upper_shadow",
-            "9. 天井圏回避 現在スキップ": "ceiling_avoid",
-            "10. 新高値": "new_high_pass",
-            "11. 0.1%以上陽線": "positive_01_pass"
+            "5. 溜め": "tame_pass",
+            "6. 右肩上がり": "right_shoulder_pass",
+            "7. 長期トレンド": "trend_align"
         }
         for i, row in enumerate(all_records):
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
@@ -168,7 +157,7 @@ def update_yesterday_results():
                 cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
                 
                 s_key = reverse_stage_map.get(stage_name, "completed_pass")
-                if stage_name == "11. 0.1%以上陽線" and row[3] != "通常": 
+                if stage_name == "7. 長期トレンド" and row[3] != "通常": 
                     s_key = "completed_pass"
                 
                 result_line = f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
@@ -177,7 +166,6 @@ def update_yesterday_results():
     except Exception as e: print(f"当月シート判定エラー: {e}")
 
 def update_sheet2_results():
-    # 【休止中】シート2の自動更新処理をスキップします
     pass
 
 # --- 株価選定ロジック ---
@@ -186,7 +174,7 @@ def analyze_stock(symbol):
     if df is None: return "SKIP"
     
     idx = len(df) - 1
-    if idx < 480: return "SKIP"
+    if idx < 100: return "SKIP"  
     
     prev_idx = idx - 1
 
@@ -197,11 +185,12 @@ def analyze_stock(symbol):
     ma100 = c.rolling(100).mean()
     ma300 = c.rolling(300).mean()
 
-    # 1. データ取得成功
+    # 1. 全データ取得成功
     stage_survivors["stage1"] += 1
     
-    # 2. 月足60
-    if c.iloc[idx] > ma60.iloc[idx]: 
+    # 2. 月足MA60上抜け (MA60_Monthlyカラムがあれば使用、無ければ日足MA60で代用)
+    ma60_m = df['MA60_Monthly'] if 'MA60_Monthly' in df.columns else ma60
+    if c.iloc[idx] > ma60_m.iloc[idx]: 
         stage_survivors["stage2"] += 1
     else: return "SKIP"
     
@@ -210,60 +199,45 @@ def analyze_stock(symbol):
         stage_survivors["stage3"] += 1
     else: return "SKIP"
     
-    # 4. 下半身
+    # 4. 下半身(終値>MA5)
     if c.iloc[idx] > ma5.iloc[idx]: 
         stage_survivors["stage4"] += 1
     else: return "SKIP"
     
-    # 5. 溜め
-    if c.iloc[prev_idx] < ma5.iloc[prev_idx]: 
-        stage_survivors["stage5"] += 1
-    else: return "SKIP"
-    
-    # 6. 右肩
-    if ma60.iloc[idx] > ma60.iloc[prev_idx]: 
-        stage_survivors["stage6"] += 1
-    else: return "SKIP"
-    
+    # ※. MA20上抜け後7日以内
+    cross_check = False
+    for i in range(idx - 6, idx + 1):
+        if i >= 1 and c.iloc[i] > ma20.iloc[i] and c.iloc[i-1] <= ma20.iloc[i-1]:
+            cross_check = True
+            break
+    if not cross_check: return "SKIP"
+
     # PPP判定用レーベル作成
     ppp_label = "★PPP " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0)) else ("★PPP(Short) " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx]) else "")
     data_date = df.index[idx].strftime("%Y-%m-%d")
     
-    # 7. 長期トレンド
+    # 5. 溜め(前日終値<MA5)
+    if c.iloc[prev_idx] < ma5.iloc[prev_idx]: 
+        stage_survivors["stage5"] += 1
+    else:
+        # ステージ5の条件不合格：ここからシート書き込み対象(5. 溜めとして記録)
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "tame_pass", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    
+    # 6. 右肩上がり(MA60)
+    if ma60.iloc[idx] > ma60.iloc[prev_idx]: 
+        stage_survivors["stage6"] += 1
+    else:
+        # ステージ6の条件不合格：(6. 右肩上がりとして記録)
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "right_shoulder_pass", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+        
+    # 7. 長期トレンド(MA100上昇)
     if ma100.iloc[idx] > ma100.iloc[prev_idx]: 
         stage_survivors["stage7"] += 1
     else:
+        # ステージ7の条件不合格：(7. 長期トレンドとして記録)
         sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
-        return "SKIP"
-        
-    # 8. 上ヒゲクリア
-    upper = h.iloc[idx] - max(o.iloc[idx], c.iloc[idx])
-    body = abs(c.iloc[idx] - o.iloc[idx])
-    if body == 0 or (upper <= (body * 1.5)): 
-        stage_survivors["stage8"] += 1
-    else:
-        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "upper_shadow", "ppp_label": ppp_label, "date": data_date}
-        return "SKIP"
-        
-    # 9. 天井圏MA100回避【★一時的に無条件スルー記号（True or）を追加】
-    if True or (abs(c.iloc[idx] - ma100.iloc[idx]) / ma100.iloc[idx]) >= 0.03: 
-        stage_survivors["stage9"] += 1
-    else:
-        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "ceiling_avoid", "ppp_label": ppp_label, "date": data_date}
-        return "SKIP"
-        
-    # 10. 新高値MA5更新
-    if ma5.iloc[idx] >= ma5.rolling(20).max().iloc[idx]: 
-        stage_survivors["stage10"] += 1
-    else:
-        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "new_high_pass", "ppp_label": ppp_label, "date": data_date}
-        return "SKIP"
-        
-    # 新11. 0.1%以上陽線クリア (開始値より終値が0.1%以上高い場合のみ通過)
-    if o.iloc[idx] > 0 and ((c.iloc[idx] - o.iloc[idx]) / o.iloc[idx]) >= 0.001:
-        stage_survivors["stage11"] += 1
-    else:
-        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "positive_01_pass", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
         
     # 全ステージ完全合格の記録
@@ -278,15 +252,12 @@ def analyze_stock(symbol):
 # --- スプレッドシート記録 ---
 def record_to_spreadsheet():
     try:
-        # 当月の「X月」シートを自動取得・作成して書き込み
         sheet_current_month = connect_spreadsheet()
         stage_map = {
-            "trend_align": "7. 長トレンド",
-            "upper_shadow": "8. 上ヒゲ",
-            "ceiling_avoid": "9. 天井圏回避 現在スキップ",
-            "new_high_pass": "10. 新高値",
-            "positive_01_pass": "11. 0.1%以上陽線",
-            "completed_pass": "11. 0.1%以上陽線"
+            "tame_pass": "5. 溜め",
+            "right_shoulder_pass": "6. 右肩上がり",
+            "trend_align": "7. 長期トレンド",
+            "completed_pass": "7. 長期トレンド"
         }
         new_rows_s1 = [[r["date"], code, stage_map[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in stage_map]
         if new_rows_s1: 
@@ -295,28 +266,20 @@ def record_to_spreadsheet():
     except Exception as e:
         print(f"当月シートへの追記エラー: {e}")
 
-    # --- 【休止中】旧シート2への追加処理は停止しています ---
-    # try:
-    #     if selected_stocks:
-    #         sheet2 = connect_spreadsheet("シート2")
-    #         ...
-    # except Exception as e:
-    #     print(f"シート2への追記エラー: {e}")
-
 # --- メイン処理 ---
 def main():
     fetch_global_latest_date()
     
     # 1. 過去データの自動答え合わせ実行
     update_yesterday_results()
-    update_sheet2_results()  # 現在内部処理はpass(休止)
+    update_sheet2_results()  
     
     # 2. 当日の全銘柄スクリーニング
     start_r, end_r = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
     print(f"処理開始: {start_r}〜{end_r}")
     
     for s in [str(i) for i in range(start_r, end_r)]: 
-        if 1300 <= int(s) <= 1600: continue  # ETF/REIT除外
+        if 1300 <= int(s) <= 1600: continue  
         analyze_stock(s)
         
     # 3. スプレッドシートへ判定待ちデータを一括書き込み
@@ -334,24 +297,17 @@ def main():
         f"4.下半身: {stage_survivors['stage4']}\n"
         f"5.溜め: {stage_survivors['stage5']}\n"
         f"6.右肩: {stage_survivors['stage6']}\n"
-        f"7.長期T: {stage_survivors['stage7']}\n"
-        f"8.上ヒゲ: {stage_survivors['stage8']}\n"
-        f"9.天井回避: {stage_survivors['stage9']} (※スルー適用中)\n"
-        f"10.新高値: {stage_survivors['stage10']}\n"
-        f"11.0.1%以上陽線: {stage_survivors['stage11']}"
+        f"7.長期T: {stage_survivors['stage7']}"
     )
     
-    # 日経平均の評価文字列を取得
     nikkei_block = get_nikkei_evaluation_line()
     
     judgement_lines = ["【本日確定の判定結果】"]
     has_any_result = False
     stage_count_map = {
+        "tame_pass": stage_survivors['stage5'],
+        "right_shoulder_pass": stage_survivors['stage6'],
         "trend_align": stage_survivors['stage7'],
-        "upper_shadow": stage_survivors['stage8'],
-        "ceiling_avoid": stage_survivors['stage9'],
-        "new_high_pass": stage_survivors['stage10'],
-        "positive_01_pass": stage_survivors['stage11'],
         "completed_pass": len(final_list)
     }
 
@@ -375,16 +331,13 @@ def main():
 --------------------------------------------------
 【条件一覧】
 1. 全データ取得成功
-2. 月足クリア >MA60
-3. 出来高5万株クリア
-4. 下半身クリア
-5. 溜めクリア >MA5
-6. 右肩上がり >MA60
-7. 長期トレンド MA100>前日
-8. 上ヒゲクリア
-9. 天井圏回避 (★一時的スルー無効化中)
-10. 新高値更新 >MA5
-11. 0.1%以上陽線 ((終値 - 開始値) / 開始値 >= 0.1%)
+2. 月足MA60上抜け
+3. 出来高5万株以上
+4. 下半身(終値>MA5)
+※. MA20上抜け後7日以内
+5. 溜め(前日終値<MA5)
+6. 右肩上がり(MA60)
+7. 長期トレンド(MA100上昇)
 
 【判定結果マーク基準】翌日終値
  ◎ ： +2.0%以上
