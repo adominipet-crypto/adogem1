@@ -14,8 +14,8 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 # --- グローバル変数 ---
-# 1〜7の7ステージ構成に変更
-stage_survivors = {f"stage{i}": 0 for i in range(1, 8)}  
+# 1〜8の8ステージ構成に変更
+stage_survivors = {f"stage{i}": 0 for i in range(1, 9)}  
 stats = {"★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0}
 sheet1_final_log = {}
 selected_stocks = {}
@@ -240,6 +240,14 @@ def analyze_stock(symbol):
         sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
         
+    # 8. 当日陽線(始値<終値)
+    if o.iloc[idx] < c.iloc[idx]:
+        stage_survivors["stage8"] += 1
+    else:
+        # ステージ8の条件不合格：(7. 長期トレンドとして記録)
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+
     # 全ステージ完全合格の記録
     sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "completed_pass", "ppp_label": ppp_label, "date": data_date}
     selected_stocks[symbol] = {"price": int(c.iloc[idx]), "ppp_label": ppp_label, "date": data_date}
@@ -297,7 +305,8 @@ def main():
         f"4.下半身: {stage_survivors['stage4']}\n"
         f"5.溜め: {stage_survivors['stage5']}\n"
         f"6.右肩: {stage_survivors['stage6']}\n"
-        f"7.長期T: {stage_survivors['stage7']}"
+        f"7.長期T: {stage_survivors['stage7']}\n"
+        f"8.当日陽線: {stage_survivors['stage8']}"
     )
     
     nikkei_block = get_nikkei_evaluation_line()
@@ -338,6 +347,7 @@ def main():
 5. 溜め(前日終値<MA5)
 6. 右肩上がり(MA60)
 7. 長期トレンド(MA100上昇)
+8. 当日陽線(始値<終値)
 
 【判定結果マーク基準】翌日終値
  ◎ ： +2.0%以上
