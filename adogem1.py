@@ -339,6 +339,15 @@ def main():
     judgement_block = "\n".join(judgement_lines).strip()
     final_list_str = "\n".join(final_list) if final_list else '  該当なし'
 
+    # ご指定の判定結果テキストを追加
+    logic_results_text = """
+--------------------------------------------------
+【6〜9の判定結果】
+6. ◎10 / ◯36 / ▲5 / ✕45 / ◎◯48%
+7. ◎10 / ◯30 / ▲5 / ✕43 / ◎◯45%
+8. ◎7 / ◯19 / ▲4 / ✕39 / ◎◯38%
+8. ◎4 / ◯10 / ▲2 / ✕29 / ◎◯31%"""
+
     condition_text = """
 
 --------------------------------------------------
@@ -370,6 +379,7 @@ def main():
         f"==================================================\n"
         f"{nikkei_block}\n\n"  
         f"{judgement_block}"
+        f"{logic_results_text}"
         f"{condition_text}"
     )
     
