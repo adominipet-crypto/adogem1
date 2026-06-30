@@ -36,6 +36,14 @@ STAGE_LABELS = {
     "completed_pass": "完全合格"
 }
 
+# 6〜9の自動集計用カウンター
+stage_stats_counter = {
+    6: {"◎": 0, "◯": 0, "▲": 0, "✕": 0},
+    7: {"◎": 0, "◯": 0, "▲": 0, "✕": 0},
+    8: {"◎": 0, "◯": 0, "▲": 0, "✕": 0},
+    9: {"◎": 0, "◯": 0, "▲": 0, "✕": 0}
+}
+
 # --- 共通関数 ---
 def fetch_global_latest_date():
     global GLOBAL_LATEST_DATE
@@ -131,7 +139,7 @@ def get_nikkei_evaluation_line():
 
 # --- 判定処理 (前日分の自動答え合わせ) ---
 def update_yesterday_results():
-    global stage_results_report
+    global stage_results_report, stage_stats_counter
     try:
         sheet = connect_spreadsheet()
         all_records = sheet.get_all_values()
@@ -162,6 +170,27 @@ def update_yesterday_results():
                 
                 result_line = f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
                 stage_results_report[s_key].append(result_line)
+
+                # 6〜9ステージ判定結果の動的自動集計
+                if stage_name == "6. 溜め":
+                    stage_stats_counter[6][mark] += 1
+                elif stage_name == "7. 右肩上がり":
+                    stage_stats_counter[7][mark] += 1
+                elif stage_name == "8. 長期トレンド":
+                    # ステージ8と9の振り分け判定（選定日の終値が始値より高ければステージ9、以下ならステージ8）
+                    try:
+                        hist_df = get_stock_data_fallback(code, force_check_date=False)
+                        if hist_df is not None and sel_date in hist_df.index.date:
+                            day_data = hist_df[hist_df.index.date == sel_date].iloc[0]
+                            if day_data['Open'] < day_data['Close']:
+                                stage_stats_counter[9][mark] += 1
+                            else:
+                                stage_stats_counter[8][mark] += 1
+                        else:
+                            stage_stats_counter[8][mark] += 1
+                    except:
+                        stage_stats_counter[8][mark] += 1
+
         if cell_list: sheet.update_cells(cell_list)
     except Exception as e: print(f"当月シート判定エラー: {e}")
 
@@ -339,14 +368,19 @@ def main():
     judgement_block = "\n".join(judgement_lines).strip()
     final_list_str = "\n".join(final_list) if final_list else '  該当なし'
 
-    # ご指定の判定結果テキストを追加
-    logic_results_text = """
---------------------------------------------------
-【6〜9の判定結果】
-6. ◎10 / ◯36 / ▲5 / ✕45 / ◎◯48%
-7. ◎10 / ◯30 / ▲5 / ✕43 / ◎◯45%
-8. ◎7 / ◯19 / ▲4 / ✕39 / ◎◯38%
-8. ◎4 / ◯10 / ▲2 / ✕29 / ◎◯31%"""
+    # 集計データからメール用のテキストを生成（分母が0の場合は0%とする）
+    logic_report_lines = []
+    for stg in [6, 7, 8, 9]:
+        counts = stage_stats_counter[stg]
+        total = sum(counts.values())
+        win_rate = 0
+        if total > 0:
+            win_rate = int(round((counts["◎"] + counts["◯"]) / total * 100))
+        
+        line = f"{stg}. ◎{counts['◎']} / ◯{counts['◯']} / ▲{counts['▲']} / ✕{counts['✕']} / ◎◯{win_rate}%"
+        logic_report_lines.append(line)
+        
+    logic_results_text = "\n" + "\n".join(logic_report_lines)
 
     condition_text = """
 
@@ -378,7 +412,9 @@ def main():
         f"{final_list_str}\n\n"
         f"==================================================\n"
         f"{nikkei_block}\n\n"  
-        f"{judgement_block}"
+        f"{judgement_block}\n\n"
+        f"--------------------------------------------------\n"
+        f"【6〜9の判定結果】"
         f"{logic_results_text}"
         f"{condition_text}"
     )
