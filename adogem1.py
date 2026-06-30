@@ -159,6 +159,8 @@ def update_yesterday_results():
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
             code, row_date_str = row[1], row[0]
             stage_name = row[2]
+            ppp_status = row[3].strip() # PPP列の値を取得（通常、★PPP、★PPP(Short) など）
+            
             try: 
                 selected_price = int(row[4])
                 sel_date = datetime.datetime.strptime(row_date_str, "%Y-%m-%d").date()
@@ -172,7 +174,9 @@ def update_yesterday_results():
                 
                 s_key = reverse_stage_map.get(stage_name, "completed_pass")
                 
-                result_line = f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
+                # PPP条件（★PPP または ★PPP(Short)）があれば、判定記号の前に挿入する
+                ppp_prefix = f"{ppp_status} " if ppp_status in ["★PPP", "★PPP(Short)"] else ""
+                result_line = f"  {ppp_prefix}{mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
                 stage_results_report[s_key].append(result_line)
 
                 # 6〜9ステージ判定結果の動的自動集計
