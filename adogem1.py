@@ -14,25 +14,27 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 # --- グローバル変数 ---
-# 1〜9の9ステージ構成に変更
+# 1〜9の9ステージ構成
 stage_survivors = {f"stage{i}": 0 for i in range(1, 10)}  
 stats = {"★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0}
 sheet1_final_log = {}
 selected_stocks = {}
 GLOBAL_LATEST_DATE = None  
 
-# ステージ6〜8および完全合格の答え合わせ用レポート構造
+# ステージ6〜9および完全合格の答え合わせ用レポート構造
 stage_results_report = {
-    "tame_pass": [],
-    "right_shoulder_pass": [],
-    "trend_align": [],
+    "stage6": [],
+    "stage7": [],
+    "stage8": [],
+    "stage9": [],
     "completed_pass": []
 }
 
 STAGE_LABELS = {
-    "tame_pass": "6.溜め",
-    "right_shoulder_pass": "7.右肩上がり",
-    "trend_align": "8.長期トレンド",
+    "stage6": "6.溜め",
+    "stage7": "7.右肩上がり",
+    "stage8": "8.長期トレンド",
+    "stage9": "9.当日陽線",
     "completed_pass": "完全合格"
 }
 
@@ -144,11 +146,15 @@ def update_yesterday_results():
         sheet = connect_spreadsheet()
         all_records = sheet.get_all_values()
         cell_list = []
+        
+        # スプレッドシートの文字列からキーへのマッピング
         reverse_stage_map = {
-            "6. 溜め": "tame_pass",
-            "7. 右肩上がり": "right_shoulder_pass",
-            "8. 長期トレンド": "trend_align"
+            "6. 溜め": "stage6",
+            "7. 右肩上がり": "stage7",
+            "8. 長期トレンド": "stage8",
+            "9. 当日陽線": "stage9"
         }
+        
         for i, row in enumerate(all_records):
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
             code, row_date_str = row[1], row[0]
@@ -165,8 +171,6 @@ def update_yesterday_results():
                 cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
                 
                 s_key = reverse_stage_map.get(stage_name, "completed_pass")
-                if stage_name == "8. 長期トレンド" and row[3] != "通常": 
-                    s_key = "completed_pass"
                 
                 result_line = f"  {mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
                 stage_results_report[s_key].append(result_line)
@@ -177,19 +181,9 @@ def update_yesterday_results():
                 elif stage_name == "7. 右肩上がり":
                     stage_stats_counter[7][mark] += 1
                 elif stage_name == "8. 長期トレンド":
-                    # ステージ8と9の振り分け判定（選定日の終値が始値より高ければステージ9、以下ならステージ8）
-                    try:
-                        hist_df = get_stock_data_fallback(code, force_check_date=False)
-                        if hist_df is not None and sel_date in hist_df.index.date:
-                            day_data = hist_df[hist_df.index.date == sel_date].iloc[0]
-                            if day_data['Open'] < day_data['Close']:
-                                stage_stats_counter[9][mark] += 1
-                            else:
-                                stage_stats_counter[8][mark] += 1
-                        else:
-                            stage_stats_counter[8][mark] += 1
-                    except:
-                        stage_stats_counter[8][mark] += 1
+                    stage_stats_counter[8][mark] += 1
+                elif stage_name == "9. 当日陽線":
+                    stage_stats_counter[9][mark] += 1
 
         if cell_list: sheet.update_cells(cell_list)
     except Exception as e: print(f"当月シート判定エラー: {e}")
@@ -217,7 +211,7 @@ def analyze_stock(symbol):
     # 1. 全データ取得成功
     stage_survivors["stage1"] += 1
     
-    # 2. 月足MA60上抜け (MA60_Monthlyカラムがあれば使用、無ければ日足MA60で代用)
+    # 2. 月足MA60上抜け
     ma60_m = df['MA60_Monthly'] if 'MA60_Monthly' in df.columns else ma60
     if c.iloc[idx] > ma60_m.iloc[idx]: 
         stage_survivors["stage2"] += 1
@@ -252,32 +246,28 @@ def analyze_stock(symbol):
     if c.iloc[prev_idx] < ma5.iloc[prev_idx]: 
         stage_survivors["stage6"] += 1
     else:
-        # ステージ6の条件不合格：ここからシート書き込み対象(6. 溜めとして記録)
-        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "tame_pass", "ppp_label": ppp_label, "date": data_date}
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "stage6", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
     
     # 7. 右肩上がり(MA60)
     if ma60.iloc[idx] > ma60.iloc[prev_idx]: 
         stage_survivors["stage7"] += 1
     else:
-        # ステージ7の条件不合格：(7. 右肩上がりとして記録)
-        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "right_shoulder_pass", "ppp_label": ppp_label, "date": data_date}
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "stage7", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
         
     # 8. 長期トレンド(MA100上昇)
     if ma100.iloc[idx] > ma100.iloc[prev_idx]: 
         stage_survivors["stage8"] += 1
     else:
-        # ステージ8の条件不合格：(8. 長期トレンドとして記録)
-        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "stage8", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
         
     # 9. 当日陽線(始値<終値)
     if o.iloc[idx] < c.iloc[idx]:
         stage_survivors["stage9"] += 1
     else:
-        # ステージ9の条件不合格：(8. 長期トレンドとして記録)
-        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "trend_align", "ppp_label": ppp_label, "date": data_date}
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "stage9", "ppp_label": ppp_label, "date": data_date}
         return "SKIP"
 
     # 全ステージ完全合格の記録
@@ -294,10 +284,11 @@ def record_to_spreadsheet():
     try:
         sheet_current_month = connect_spreadsheet()
         stage_map = {
-            "tame_pass": "6. 溜め",
-            "right_shoulder_pass": "7. 右肩上がり",
-            "trend_align": "8. 長期トレンド",
-            "completed_pass": "8. 長期トレンド"
+            "stage6": "6. 溜め",
+            "stage7": "7. 右肩上がり",
+            "stage8": "8. 長期トレンド",
+            "stage9": "9. 当日陽線",
+            "completed_pass": "9. 当日陽線" # 完全合格したものはステージ9として記録
         }
         new_rows_s1 = [[r["date"], code, stage_map[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in stage_map]
         if new_rows_s1: 
@@ -347,9 +338,10 @@ def main():
     judgement_lines = ["【本日確定の判定結果】"]
     has_any_result = False
     stage_count_map = {
-        "tame_pass": stage_survivors['stage6'],
-        "right_shoulder_pass": stage_survivors['stage7'],
-        "trend_align": stage_survivors['stage8'],
+        "stage6": stage_survivors['stage6'],
+        "stage7": stage_survivors['stage7'],
+        "stage8": stage_survivors['stage8'],
+        "stage9": stage_survivors['stage9'],
         "completed_pass": len(final_list)
     }
 
@@ -368,7 +360,7 @@ def main():
     judgement_block = "\n".join(judgement_lines).strip()
     final_list_str = "\n".join(final_list) if final_list else '  該当なし'
 
-    # 集計データからメール用のテキストを生成（分母が0の場合は0%とする）
+    # 集計データからメール用のテキストを生成
     logic_report_lines = []
     for stg in [6, 7, 8, 9]:
         counts = stage_stats_counter[stg]
