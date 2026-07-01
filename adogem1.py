@@ -104,8 +104,11 @@ def get_stock_data_fallback(symbol, force_check_date=True):
         df = pd.DataFrame({"Close": quotes.get("close", []), "Open": quotes.get("open", []), "High": quotes.get("high", []), "Low": quotes.get("low", []), "Volume": quotes.get("volume", [])}, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
         df = df.dropna().sort_index()
         
-        if force_check_date and GLOBAL_LATEST_DATE and df.index[-1].date() != GLOBAL_LATEST_DATE:
-            return None
+        # 【修正箇所】厳格な完全一致から、前後7日以内のズレであれば許容するように緩和
+        if force_check_date and GLOBAL_LATEST_DATE:
+            days_diff = abs((df.index[-1].date() - GLOBAL_LATEST_DATE).days)
+            if days_diff > 7:
+                return None
         return df
     except Exception as e:
         return None
@@ -223,3 +226,100 @@ def analyze_stock(symbol):
     ma5 = c.rolling(5).mean()
     ma20 = c.rolling(20).mean()
     ma60 = c.rolling(60).mean()
+    ma100 = c.rolling(100).mean()
+    ma300 = c.rolling(300).mean()
+
+    # 1. 全データ取得成功
+    stage_survivors["stage1"] += 1
+    
+    # 2. 月足MA60上抜け
+    ma60_m = df['MA60_Monthly'] if 'MA60_Monthly' in df.columns else ma60
+    if c.iloc[idx] > ma60_m.iloc[idx]: stage_survivors["stage2"] += 1
+    else: return "SKIP"
+    
+    # 3. 出来高5万株以上
+    if v.iloc[idx] >= 50000: stage_survivors["stage3"] += 1
+    else: return "SKIP"
+    
+    # 4. 下半身(終値>MA5)
+    if c.iloc[idx] > ma5.iloc[idx]: stage_survivors["stage4"] += 1
+    else: return "SKIP"
+    
+    # 5. MA20上抜け後7日以内
+    cross_check = False
+    for i in range(idx - 6, idx + 1):
+        if i >= 1 and c.iloc[i] > ma20.iloc[i] and c.iloc[i-1] <= ma20.iloc[i-1]:
+            cross_check = True
+            break
+    if cross_check: stage_survivors["stage5"] += 1
+    else: return "SKIP"
+
+    # PPP判定用レーベル作成
+    ppp_label = "★PPP " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0)) else ("★PPP(Short) " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx]) else "")
+    data_date = df.index[idx].strftime("%Y-%m-%d")
+    
+    # 6. 溜め(前日終値<MA5)
+    if c.iloc[prev_idx] < ma5.iloc[prev_idx]: stage_survivors["stage6"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "stage6", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    
+    # 7. 右肩上がり(MA60)
+    if ma60.iloc[idx] > ma60.iloc[prev_idx]: stage_survivors["stage7"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "stage7", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+        
+    # 8. 長期トレンド(MA100上昇)
+    if ma100.iloc[idx] > ma100.iloc[prev_idx]: stage_survivors["stage8"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "stage8", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+        
+    # 9. 当日陽線(始値<終値)
+    if o.iloc[idx] < c.iloc[idx]: stage_survivors["stage9"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "stage9", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+
+    # 全ステージ完全合格の記録
+    sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "completed_pass", "ppp_label": ppp_label, "date": data_date}
+    selected_stocks[symbol] = {"price": int(c.iloc[idx]), "ppp_label": ppp_label, "date": data_date}
+    
+    if "★PPP " in ppp_label: stats["★PPP"] += 1
+    elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
+    else: stats["normal_detect"] += 1
+    return "OK"
+
+# --- スプレッドシート記録 ---
+def record_to_spreadsheet():
+    try:
+        sheet_current_month = connect_spreadsheet()
+        stage_map = {
+            "stage6": "6. 溜め", "stage7": "7. 右肩上がり",
+            "stage8": "8. 長期トレンド", "stage9": "9. 当日陽線",
+            "completed_pass": "9. 当日陽線" 
+        }
+        new_rows_s1 = [[r["date"], code, stage_map[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for code, r in sheet1_final_log.items() if r["stage_key"] in stage_map]
+        if new_rows_s1: 
+            sheet_current_month.append_rows(new_rows_s1, value_input_option='RAW')
+            print(f"データ追記完了: {len(new_rows_s1)}件")
+    except Exception as e:
+        print(f"当月シートへの追記エラー: {e}")
+
+# --- メイン処理 ---
+def main():
+    fetch_global_latest_date()
+    
+    # 1. 過去データの自動答え合わせ実行
+    update_yesterday_results()
+    update_sheet2_results()  
+    
+    # 2. 当日の全銘柄スクリーニング
+    start_r = int(sys.argv[1]) if len(sys.argv) > 1 else 1300
+    end_r = int(sys.argv[2]) if len(sys.argv) > 2 else 10001
+    print(f"開始: {start_r} から {end_r}")
+    
+    for s in [str(i) for i in range(start_r, end_r)]: 
+        if 1300 <= int(s) <= 1600: continue  
+        analyze_stock
