@@ -249,9 +249,9 @@ def analyze_stock(symbol):
         stage_survivors["stage4"] += 1
     else: return "SKIP"
     
-    # 5. MA20上抜け後7日以内
+    # 5. MA20上抜け後5日以内
     cross_check = False
-    for i in range(idx - 6, idx + 1):
+    for i in range(idx - 4, idx + 1):
         if i >= 1 and c.iloc[i] > ma20.iloc[i] and c.iloc[i-1] <= ma20.iloc[i-1]:
             cross_check = True
             break
