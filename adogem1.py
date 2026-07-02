@@ -105,7 +105,7 @@ def get_stock_data_fallback(symbol, force_check_date=True):
         timestamps = result[0].get("timestamp", [])
         df = pd.DataFrame({"Close": quotes.get("close", []), "Open": quotes.get("open", []), "High": quotes.get("high", []), "Low": quotes.get("low", []), "Volume": quotes.get("volume", [])}, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
         df = df.dropna().sort_index()
-        if force_check_date smash and GLOBAL_LATEST_DATE and df.index[-1].date() != GLOBAL_LATEST_DATE: return None
+        if force_check_date and GLOBAL_LATEST_DATE and df.index[-1].date() != GLOBAL_LATEST_DATE: return None
         return df
     except: return None
 
@@ -459,4 +459,19 @@ def main():
         f"{condition_text}"
     )
     
-    # 5. メール
+    # 5. メール送信
+    try:
+        msg = MIMEMultipart()
+        msg['From'], msg['To'], msg['Subject'] = SENDER_EMAIL, SENDER_EMAIL, f"📊 adoGEM レポート {len(final_list)}件"
+        msg.attach(MIMEText(body, 'plain'))
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print("検証レポートメールを正常に送信しました。")
+    except Exception as e:
+        print(f"メール送信エラー: {e}")
+
+if __name__ == "__main__": 
+    main()
