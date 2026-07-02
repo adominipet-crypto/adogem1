@@ -132,13 +132,25 @@ def get_nikkei_evaluation_line():
         df = pd.DataFrame({"Close": quotes.get("close", [])}, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
         df = df.dropna().sort_index()
         
-        if len(df) < 2: return "【日経平均の判定】\n  判定データ不足"
+        # インデックスを日付型に変換して日付のみで判定しやすくする
+        df.index = df.index.date
         
-        # 最新日と、その直前の営業日のデータを確実に取得して比較
-        prev_close = df.iloc[-2]['Close']  
-        curr_close = df.iloc[-1]['Close']  
-        prev_date_str = df.index[-2].strftime("%m-%d")
-        curr_date_str = df.index[-1].strftime("%m-%d")
+        # 個別銘柄の基準日（GLOBAL_LATEST_DATE）とその前営業日をターゲットに設定
+        curr_date = GLOBAL_LATEST_DATE if GLOBAL_LATEST_DATE else df.index[-1]
+        prev_date = get_previous_trading_day(curr_date)
+        
+        # ターゲットの日付がデータ内に存在するかチェックし、無ければ直近の末尾2件でフォールバック
+        if prev_date in df.index and curr_date in df.index:
+            prev_close = df.loc[prev_date, 'Close']
+            curr_close = df.loc[curr_date, 'Close']
+            prev_date_str = prev_date.strftime("%m-%d")
+            curr_date_str = curr_date.strftime("%m-%d")
+        else:
+            if len(df) < 2: return "【日経平均の判定】\n  判定データ不足"
+            prev_close = df.iloc[-2]['Close']  
+            curr_close = df.iloc[-1]['Close']  
+            prev_date_str = df.index[-2].strftime("%m-%d")
+            curr_date_str = df.index[-1].strftime("%m-%d")
         
         pct = ((curr_close - prev_close) / prev_close) * 100
         mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
@@ -249,9 +261,9 @@ def analyze_stock(symbol):
         stage_survivors["stage4"] += 1
     else: return "SKIP"
     
-    # 5. MA20上抜け後5日以内
+    # 5. MA20上抜け後7日以内
     cross_check = False
-    for i in range(idx - 4, idx + 1):
+    for i in range(idx - 6, idx + 1):
         if i >= 1 and c.iloc[i] > ma20.iloc[i] and c.iloc[i-1] <= ma20.iloc[i-1]:
             cross_check = True
             break
