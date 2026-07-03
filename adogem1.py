@@ -105,7 +105,7 @@ def get_stock_data_fallback(symbol, force_check_date=True):
         timestamps = result[0].get("timestamp", [])
         df = pd.DataFrame({"Close": quotes.get("close", []), "Open": quotes.get("open", []), "High": quotes.get("high", []), "Low": quotes.get("low", []), "Volume": quotes.get("volume", [])}, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
         df = df.dropna().sort_index()
-        if force_check_date and GLOBAL_LATEST_DATE and df.index[-1].date() != GLOBAL_LATEST_DATE: return None
+        if force_check_date Useful and GLOBAL_LATEST_DATE and df.index[-1].date() != GLOBAL_LATEST_DATE: return None
         return df
     except: return None
 
@@ -117,10 +117,9 @@ def get_next_trading_day_data(symbol, base_date):
         return future_df.iloc[0] if not future_df.empty else None
     except: return None
 
-# --- 日経平均の判定行を自動作成する関数（安定版への修正箇所） ---
+# --- 日経平均の判定行を自動作成する関数 ---
 def get_nikkei_evaluation_line():
     try:
-        # 安定したYahoo FinanceのAPIから日経平均の時系列データを直接取得
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/^N225?range=1mo&interval=1d&nocache={int(time.time())}"
         headers = {"User-Agent": "Mozilla/5.0"}
         res = requests.get(url, headers=headers, timeout=15)
@@ -134,7 +133,6 @@ def get_nikkei_evaluation_line():
         quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
         timestamps = result[0].get("timestamp", [])
         
-        # 出来高による行落ちを防ぐため、Close値のみでDataFrameを作成
         df = pd.DataFrame({"Close": quotes.get("close", [])}, index=[datetime.datetime.fromtimestamp(ts).date() for ts in timestamps])
         df = df.dropna().sort_index()
         
@@ -170,13 +168,11 @@ def update_yesterday_results():
         all_records = sheet.get_all_values()
         cell_list = []
         
-        # 最新営業日の前営業日を答え合わせの対象日付に設定
         if GLOBAL_LATEST_DATE:
             target_match_date = get_previous_trading_day(GLOBAL_LATEST_DATE)
         else:
             target_match_date = None
 
-        # スプレッドシートの文字列からキーへのマッピング
         reverse_stage_map = {
             "6. 溜め": "stage6",
             "7. 右肩上がり": "stage7",
@@ -188,17 +184,90 @@ def update_yesterday_results():
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
             code, row_date_str = row[1], row[0]
             stage_name = row[2]
-            ppp_status = row[3].strip() # PPP列の値を取得（通常、★PPP、★PPP(Short) など）
+            ppp_status = row[3].strip()
             
             try: 
                 selected_price = int(row[4])
                 sel_date = datetime.datetime.strptime(row_date_str, "%Y-%m-%d").date()
-                # スプレッドシートの選定日が前営業日と一致しない行はスキップ
                 if target_match_date and sel_date != target_match_date:
                     continue
-            except: continue
+            except: 
+                continue
             
             next_data = get_next_trading_day_data(code, sel_date)
             if next_data is not None:
                 next_close = int(next_data['Close'])
                 pct = ((next_close - selected_price) / selected_price) * 100
+                mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
+                cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
+                
+                s_key = reverse_stage_map.get(stage_name, "completed_pass")
+                
+                ppp_prefix = f"{ppp_status} " if ppp_status in ["★PPP", "★PPP(Short)"] else ""
+                result_line = f"  {ppp_prefix}{mark} ■ {code} | {selected_price}円 ({row_date_str[5:]}) → {next_close}円 ({pct:+.2f}%)"
+                stage_results_report[s_key].append(result_line)
+
+                if stage_name == "6. 溜め":
+                    stage_stats_counter[6][mark] += 1
+                elif stage_name == "7. 右肩上がり":
+                    stage_stats_counter[7][mark] += 1
+                elif stage_name == "8. 長期トレンド":
+                    stage_stats_counter[8][mark] += 1
+                elif stage_name == "9. 当日陽線":
+                    stage_stats_counter[9][mark] += 1
+
+        if cell_list: sheet.update_cells(cell_list)
+    except Exception as e: print(f"当月シート判定エラー: {e}")
+
+def update_sheet2_results():
+    pass
+
+# --- 株価選定ロジック ---
+def analyze_stock(symbol):
+    df = get_stock_data_fallback(symbol, force_check_date=True)
+    if df is None: return "SKIP"
+    
+    idx = len(df) - 1
+    if idx < 100: return "SKIP"  
+    
+    prev_idx = idx - 1
+
+    c = df['Close']; o = df['Open']; h = df['High']; v = df['Volume']
+    ma5 = c.rolling(5).mean()
+    ma20 = c.rolling(20).mean()
+    ma60 = c.rolling(60).mean()
+    ma100 = c.rolling(100).mean()
+    ma300 = c.rolling(300).mean()
+
+    # 1. 全データ取得成功
+    stage_survivors["stage1"] += 1
+    
+    # 2. 月足MA60上抜け
+    ma60_m = df['MA60_Monthly'] if 'MA60_Monthly' in df.columns else ma60
+    if c.iloc[idx] > ma60_m.iloc[idx]: 
+        stage_survivors["stage2"] += 1
+    else: return "SKIP"
+    
+    # 3. 出来高5万株以上
+    if v.iloc[idx] >= 50000: 
+        stage_survivors["stage3"] += 1
+    else: return "SKIP"
+    
+    # 4. 下半身(終値>MA5)
+    if c.iloc[idx] > ma5.iloc[idx]: 
+        stage_survivors["stage4"] += 1
+    else: return "SKIP"
+    
+    # 5. MA20上抜け後7日以内
+    cross_check = False
+    for i in range(idx - 6, idx + 1):
+        if i >= 1 and c.iloc[i] > ma20.iloc[i] and c.iloc[i-1] <= ma20.iloc[i-1]:
+            cross_check = True
+            break
+    if cross_check:
+        stage_survivors["stage5"] += 1
+    else: 
+        return "SKIP"
+
+    # PPP判定用レーベル作成
+    ppp_label = "★PPP " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0)) else ("★PPP(Short) " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] >
