@@ -103,7 +103,16 @@ def get_stock_data_fallback(symbol, force_check_date=True):
         if not result: return None
         quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
         timestamps = result[0].get("timestamp", [])
-        df = pd.DataFrame({"Close": quotes.get("close", []), "Open": quotes.get("open", []), "High": quotes.get("high", []), "Low": quotes.get("low", []), "Volume": quotes.get("volume", [])}, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
+        
+        # ※コピペ切れ落ち対策：長すぎる行を複数行に分割
+        df = pd.DataFrame({
+            "Close": quotes.get("close", []), 
+            "Open": quotes.get("open", []), 
+            "High": quotes.get("high", []), 
+            "Low": quotes.get("low", []), 
+            "Volume": quotes.get("volume", [])
+        }, index=[datetime.datetime.fromtimestamp(ts) for ts in timestamps])
+        
         df = df.dropna().sort_index()
         if force_check_date and GLOBAL_LATEST_DATE and df.index[-1].date() != GLOBAL_LATEST_DATE: return None
         return df
@@ -269,5 +278,208 @@ def analyze_stock(symbol):
     else: 
         return "SKIP"
 
-    # PPP判定用レーベル作成
-    ppp_label = "★PPP " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx])
+    # ※コピペ切れ落ち対策：長すぎる行を安全な複数行IF文に分割
+    ma300_val = ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0
+    if ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > ma300_val:
+        ppp_label = "★PPP "
+    elif ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx]:
+        ppp_label = "★PPP(Short) "
+    else:
+        ppp_label = ""
+        
+    data_date = df.index[idx].strftime("%Y-%m-%d")
+    
+    # 6. 溜め(前日終値<MA5)
+    if c.iloc[prev_idx] < ma5.iloc[prev_idx]: 
+        stage_survivors["stage6"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "stage6", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+    
+    # 7. 右肩上がり(MA60)
+    if ma60.iloc[idx] > ma60.iloc[prev_idx]: 
+        stage_survivors["stage7"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "stage7", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+        
+    # 8. 長期トレンド(MA100上昇)
+    if ma100.iloc[idx] > ma100.iloc[prev_idx]: 
+        stage_survivors["stage8"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "stage8", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+        
+    # 9. 当日陽線(始値<終値)
+    if o.iloc[idx] < c.iloc[idx]:
+        stage_survivors["stage9"] += 1
+    else:
+        sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "stage9", "ppp_label": ppp_label, "date": data_date}
+        return "SKIP"
+
+    # 全ステージ完全合格の記録
+    sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "completed_pass", "ppp_label": ppp_label, "date": data_date}
+    selected_stocks[symbol] = {"price": int(c.iloc[idx]), "ppp_label": ppp_label, "date": data_date}
+    
+    if "★PPP " in ppp_label: stats["★PPP"] += 1
+    elif "★PPP(Short) " in ppp_label: stats["★PPP(Short)"] += 1
+    else: stats["normal_detect"] += 1
+    return "OK"
+
+# --- スプレッドシート記録 ---
+def record_to_spreadsheet():
+    try:
+        sheet_current_month = connect_spreadsheet()
+        stage_map = {
+            "stage6": "6. 溜め",
+            "stage7": "7. 右肩上がり",
+            "stage8": "8. 長期トレンド",
+            "stage9": "9. 当日陽線",
+            "completed_pass": "9. 当日陽線"
+        }
+        
+        new_rows_s1 = [
+            [r["date"], code, stage_map[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] 
+            for code, r in sheet1_final_log.items() 
+            if r["stage_key"] in stage_map
+        ]
+        
+        if new_rows_s1: 
+            sheet_current_month.append_rows(new_rows_s1, value_input_option='RAW')
+            print(f"当月シートに当日のスキャン結果を {len(new_rows_s1)} 件（判定待ち）追記しました。")
+    except Exception as e:
+        print(f"当月シートへの追記エラー: {e}")
+
+# --- メイン処理 ---
+def main():
+    fetch_global_latest_date()
+    
+    # 1. 過去データの自動答え合わせ実行
+    update_yesterday_results()
+    update_sheet2_results()  
+    
+    # 2. 当日の全銘柄スクリーニング
+    start_r, end_r = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (1300, 10001)
+    print(f"処理開始: {start_r}〜{end_r}")
+    
+    for s in [str(i) for i in range(start_r, end_r)]: 
+        if 1300 <= int(s) <= 1600: continue  
+        analyze_stock(s)
+        
+    # 3. スプレッドシートへ判定待ちデータを一括書き込み
+    record_to_spreadsheet()
+    
+    # 4. レポートメールの組み立て
+    final_list = [
+        f"  {'★PPP ' in s['ppp_label'] and s['ppp_label'] or ''}■ {code} | {s['price']}円 ({s['date'][5:]})" 
+        for code, s in sorted(selected_stocks.items())
+    ]
+    
+    header = f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}"
+    
+    survivors_block = (
+        "【各ステージ生存数】\n"
+        f"1.取得: {stage_survivors['stage1']}\n"
+        f"2.月足60: {stage_survivors['stage2']}\n"
+        f"3.出来高: {stage_survivors['stage3']}\n"
+        f"4.下半身: {stage_survivors['stage4']}\n"
+        f"5.MA20上抜け: {stage_survivors['stage5']}\n"
+        f"6.溜め: {stage_survivors['stage6']}\n"
+        f"7.右肩: {stage_survivors['stage7']}\n"
+        f"8.長期T: {stage_survivors['stage8']}\n"
+        f"9.当日陽線: {stage_survivors['stage9']}"
+    )
+    
+    nikkei_block = get_nikkei_evaluation_line()
+    
+    judgement_lines = ["【本日確定の判定結果】"]
+    has_any_result = False
+    stage_count_map = {
+        "stage6": stage_survivors['stage6'],
+        "stage7": stage_survivors['stage7'],
+        "stage8": stage_survivors['stage8'],
+        "stage9": stage_survivors['stage9'],
+        "completed_pass": len(final_list)
+    }
+
+    for key, lines in stage_results_report.items():
+        if lines:
+            has_any_result = True
+            label = STAGE_LABELS.get(key, "不明なステージ")
+            count = stage_count_map.get(key, 0)
+            judgement_lines.append(f"{label}: {count}件中、前日クリアした銘柄の答え合わせ")
+            judgement_lines.extend(lines)
+            judgement_lines.append("")
+            
+    if not has_any_result:
+        judgement_lines.append("  該当なし")
+        
+    judgement_block = "\n".join(judgement_lines).strip()
+    final_list_str = "\n".join(final_list) if final_list else '  該当なし'
+
+    logic_report_lines = []
+    for stg in [6, 7, 8, 9]:
+        counts = stage_stats_counter[stg]
+        total = sum(counts.values())
+        win_rate = 0
+        if total > 0:
+            win_rate = int(round((counts["◎"] + counts["◯"]) / total * 100))
+        
+        line = f"{stg}. ◎{counts['◎']} / ◯{counts['◯']} / ▲{counts['▲']} / ✕{counts['✕']} / ◎◯{win_rate}%"
+        logic_report_lines.append(line)
+        
+    logic_results_text = "\n" + "\n".join(logic_report_lines)
+
+    condition_text = """
+
+--------------------------------------------------
+【条件一覧】
+1. 全データ取得成功
+2. 月足MA60上抜け
+3. 出来高5万株以上
+4. 下半身(終値>MA5)
+5. MA20上抜け後7日以内
+6. 溜め(前日終値<MA5)
+7. 右肩上がり(MA60)
+8. 長期トレンド(MA100上昇)
+9. 当日陽線(始値<終値)
+
+【判定結果マーク基準】翌日終値
+ ◎ ： +2.0%以上
+ ◯ ： +0.1%〜+2.0%
+ ▲ ： -0.1%〜+0.1%
+ ✕ ： -0.1%未満"""
+
+    body = (
+        f"==================================================\n"
+        f"{header}\n"
+        f"総対象: {end_r-start_r}件\n\n"
+        f"{survivors_block}\n\n"
+        f"★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n"
+        f"【完全合格一覧】\n"
+        f"{final_list_str}\n\n"
+        f"==================================================\n"
+        f"{nikkei_block}\n\n"  
+        f"{judgement_block}\n\n"
+        f"--------------------------------------------------\n"
+        f"【6〜9の判定結果】"
+        f"{logic_results_text}"
+        f"{condition_text}"
+    )
+    
+    # 5. メール送信
+    try:
+        msg = MIMEMultipart()
+        msg['From'], msg['To'], msg['Subject'] = SENDER_EMAIL, SENDER_EMAIL, f"📊 adoGEM レポート {len(final_list)}件"
+        msg.attach(MIMEText(body, 'plain'))
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print("検証レポートメールを正常に送信しました。")
+    except Exception as e:
+        print(f"メール送信エラー: {e}")
+
+if __name__ == "__main__": 
+    main()
