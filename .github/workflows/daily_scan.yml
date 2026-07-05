@@ -2,7 +2,7 @@ name: adoGEM Full Scan Continuous
 
 on:
   schedule:
-    - cron: '40 17 * * 1-5'
+    - cron: '20 09 * * 1-5'
   workflow_dispatch:
 
 jobs:
