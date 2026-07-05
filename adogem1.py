@@ -161,9 +161,4 @@ def get_next_trading_day_data(symbol, base_date):
 # --- 日経平均の判定行を自動作成する関数 ---
 def get_nikkei_evaluation_line():
     try:
-        url = "https://kabutan.jp/stock/kabuka?code=0000"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-        res = requests.get(url, headers=headers, timeout=15)
-        if res.status_code != 200: return "【日経平均の判定】\n  データ取得エラー(株探)"
-        
-        pattern = r'
+        url = "
