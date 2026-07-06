@@ -10,7 +10,6 @@ from google.oauth2.service_account import Credentials
 # --- 環境設定 ---
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
-# GitHub Secretsの「JQ_REFRESH_TOKEN」に入力したAPIキーをここで読み込みます
 JQ_API_KEY = os.environ.get('JQ_REFRESH_TOKEN')
 
 ALL_STOCK_DATA_CACHE = {}
@@ -24,12 +23,19 @@ def fetch_all_stock_data_from_jquants():
         return False
         
     try:
-        print("DEBUG: J-Quants V2 APIキーを用いた株価データの取得を開始します...")
-        # 【V2完全準拠】x-api-key ヘッダーに直接APIキーをセットしてリクエスト
         headers = {"x-api-key": JQ_API_KEY}
-        res = requests.get("https://api.jquants.com/v2/prices/daily_quotes", headers=headers, timeout=30)
+        res = None
         
-        print(f"DEBUG: 株価データ応答コード: {res.status_code}")
+        # 【V2仕様変更】まずはPremiumプラン用のURLで試す
+        print("DEBUG: J-Quants V2 (Premium) の株価データ取得を試みます...")
+        res = requests.get("https://api.jquants.com/v2/prices/daily_quotes/premium", headers=headers, timeout=30)
+        
+        # もし403や404エラー（プラン不一致）なら、Lightプラン用のURLで再試行
+        if res.status_code != 200:
+            print(f"DEBUG: Premiumで取得不可（コード:{res.status_code}）。Lightプラン用URLで再試行します...")
+            res = requests.get("https://api.jquants.com/v2/prices/daily_quotes/light", headers=headers, timeout=30)
+        
+        print(f"DEBUG: 株価データ最終応答コード: {res.status_code}")
         if res.status_code != 200:
             print(f"DEBUGエラー: 株価データ取得に失敗しました。応答: {res.text}")
             return False
