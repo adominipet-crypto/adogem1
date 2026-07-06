@@ -18,19 +18,18 @@ GLOBAL_LATEST_DATE = None
 def fetch_all_stock_data_from_jquants():
     global GLOBAL_LATEST_DATE, ALL_STOCK_DATA_CACHE
     
-    # トークンの存在チェック
     if not JQ_REFRESH_TOKEN:
         print("DEBUGエラー: GitHub Secretsに JQ_REFRESH_TOKEN が設定されていません。")
         return False
         
     try:
-        print("DEBUG: J-Quants IDトークンの取得を開始します...")
-        res = requests.post(f"https://api.jquants.com/v1/auth/idtoken?refreshToken={JQ_REFRESH_TOKEN}", timeout=15)
+        # 【V2修正】IDトークン取得URLを /v2/auth/idtoken に変更
+        print("DEBUG: J-Quants V2 IDトークンの取得を開始します...")
+        res = requests.post(f"https://api.jquants.com/v2/auth/idtoken?refreshToken={JQ_REFRESH_TOKEN}", timeout=15)
         
-        # ステータスコードの確認
-        print(f"DEBUG: IDトークン応答コード: {res.status_code}")
+        print(f"DEBUG: V2 IDトークン応答コード: {res.status_code}")
         if res.status_code != 200:
-            print(f"DEBUGエラー: IDトークン取得に失敗しました。応答内容: {res.text}")
+            print(f"DEBUGエラー: IDトークン取得に失敗。応答: {res.text}")
             return False
             
         id_token = res.json().get("idToken")
@@ -38,13 +37,14 @@ def fetch_all_stock_data_from_jquants():
             print("DEBUGエラー: レスポンス内に idToken が見つかりません。")
             return False
             
-        print("DEBUG: 株価データの取得を開始します...")
+        # 【V2修正】株価取得URLを /v2/prices/daily_quotes に変更
+        print("DEBUG: J-Quants V2 株価データの取得を開始します...")
         headers = {"Authorization": f"Bearer {id_token}"}
-        res = requests.get("https://api.jquants.com/v1/prices/daily_quotes", headers=headers, timeout=30)
+        res = requests.get("https://api.jquants.com/v2/prices/daily_quotes", headers=headers, timeout=30)
         
         print(f"DEBUG: 株価データ応答コード: {res.status_code}")
         if res.status_code != 200:
-            print(f"DEBUGエラー: 株価データ取得に失敗しました。応答内容: {res.text}")
+            print(f"DEBUGエラー: 株価データ取得に失敗。応答: {res.text}")
             return False
             
         data = res.json().get("daily_quotes", [])
@@ -52,11 +52,15 @@ def fetch_all_stock_data_from_jquants():
             print("DEBUGエラー: daily_quotes の中身が空です。")
             return False
             
+        # V2でも日付キー "Date"、コードキー "Code" は基本的に維持されています
         GLOBAL_LATEST_DATE = datetime.datetime.strptime(data[0]["Date"], "%Y-%m-%d").date()
         for item in data: 
-            ALL_STOCK_DATA_CACHE[item["Code"][:4]] = item
+            # 各キーがV2で大文字小文字等の変更があっても対応できるよう、念のため取得
+            code = item.get("Code", "")
+            if code:
+                ALL_STOCK_DATA_CACHE[code[:4]] = item
             
-        print(f"DEBUG成功: {GLOBAL_LATEST_DATE} のデータを {len(ALL_STOCK_DATA_CACHE)} 件取得しました。")
+        print(f"DEBUG成功: V2から {GLOBAL_LATEST_DATE} のデータを {len(ALL_STOCK_DATA_CACHE)} 件取得しました。")
         return True
         
     except Exception as e:
@@ -81,7 +85,12 @@ def run_logic():
         if i > 0 and len(row) > 6 and row[6].strip() == "判定待ち":
             code = row[1]
             if code in ALL_STOCK_DATA_CACHE:
-                next_close = float(ALL_STOCK_DATA_CACHE[code]["Close"])
+                # V2でキーが変更された場合に備え、.get()で安全に取得
+                item = ALL_STOCK_DATA_CACHE[code]
+                close_val = item.get("Close") or item.get("AdjustmentClose")
+                if close_val is None: continue
+                
+                next_close = float(close_val)
                 price = float(row[4])
                 pct = ((next_close - price) / price) * 100
                 mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
@@ -99,8 +108,13 @@ def run_logic():
     for s in [str(i) for i in range(start, end)]:
         if 1300 <= int(s) <= 1600: continue
         item = ALL_STOCK_DATA_CACHE.get(s)
-        if item and item.get("Volume", 0) >= 50000 and item["Open"] < item["Close"]:
-            new_rows.append([GLOBAL_LATEST_DATE.strftime("%Y-%m-%d"), s, "9.当日陽線", "通常", item["Close"], "", "判定待ち", ""])
+        if item:
+            open_val = item.get("Open") or item.get("AdjustmentOpen")
+            close_val = item.get("Close") or item.get("AdjustmentClose")
+            volume_val = item.get("Volume") or item.get("AdjustmentVolume", 0)
+            
+            if open_val and close_val and float(volume_val) >= 50000 and float(open_val) < float(close_val):
+                new_rows.append([GLOBAL_LATEST_DATE.strftime("%Y-%m-%d"), s, "9.当日陽線", "通常", float(close_val), "", "判定待ち", ""])
     
     if new_rows: 
         sheet.append_rows(new_rows)
