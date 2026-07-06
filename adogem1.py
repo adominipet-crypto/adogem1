@@ -10,7 +10,7 @@ from google.oauth2.service_account import Credentials
 # --- 環境設定 ---
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
-JQ_API_KEY = os.environ.get('JQ_REFRESH_TOKEN')
+JQ_API_KEY = os.environ.get('JQ_REFRESH_TOKEN') # V2のAPIキーが設定されている前提
 
 ALL_STOCK_DATA_CACHE = {}
 GLOBAL_LATEST_DATE = None
@@ -23,34 +23,44 @@ def fetch_all_stock_data_from_jquants():
         return False
         
     try:
+        # 日本時間の現在時刻を取得
+        now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
         headers = {"x-api-key": JQ_API_KEY}
+        
+        success = False
         res = None
         
-        # 【V2正式仕様】/v2/market/daily_prices に変更。まずはpremiumプランで試す
-        print("DEBUG: J-Quants V2 (Premium) の株価データ取得を開始します...")
-        res = requests.get("https://api.jquants.com/v2/market/daily_prices?plan=premium", headers=headers, timeout=30)
+        print("DEBUG: J-Quants V2 公式仕様（/v2/equities/bars/daily）でのデータ取得を開始します...")
         
-        # 403や404であれば、lightプラン用パラメータで再試行
-        if res.status_code != 200:
-            print(f"DEBUG: Premiumで取得不可（コード:{res.status_code}）。Lightプラン用で再試行します...")
-            res = requests.get("https://api.jquants.com/v2/market/daily_prices?plan=light", headers=headers, timeout=30)
+        # 土日・祝日や夕方前の未反映を考慮し、直近5日間を遡って最も新しい営業日のデータを取得する
+        for i in range(5):
+            target_date = (now - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+            
+            # 【V2仕様】必須パラメータ「date」を指定
+            url = f"https://api.jquants.com/v2/equities/bars/daily?date={target_date}"
+            print(f"DEBUG: {target_date} のデータ取得を試みます...")
+            
+            res = requests.get(url, headers=headers, timeout=30)
+            
+            if res.status_code == 200:
+                # 【V2仕様】データキーは「daily_quotes」
+                data = res.json().get("daily_quotes", [])
+                if data:
+                    GLOBAL_LATEST_DATE = datetime.datetime.strptime(target_date, "%Y-%m-%d").date()
+                    for item in data:
+                        code = item.get("Code", "")
+                        if code:
+                            ALL_STOCK_DATA_CACHE[code[:4]] = item
+                    success = True
+                    break
+            elif res.status_code == 403:
+                print(f"DEBUGエラー: {target_date} で403 Forbidden。APIキーが無効か、エンドポイント指定に問題があります。")
         
-        print(f"DEBUG: 株価データ最終応答コード: {res.status_code}")
-        if res.status_code != 200:
-            print(f"DEBUGエラー: 株価データ取得に失敗しました。応答: {res.text}")
+        if not success:
+            status = res.status_code if res else "None"
+            body = res.text if res else "None"
+            print(f"DEBUGエラー: 直近5日分の株価データが取得できませんでした。最終ステータス: {status}, 応答: {body}")
             return False
-            
-        # V2のデータキー名は daily_prices になっています
-        data = res.json().get("daily_prices", [])
-        if not data:
-            print("DEBUGエラー: daily_prices の中身が空です。")
-            return False
-            
-        GLOBAL_LATEST_DATE = datetime.datetime.strptime(data[0]["Date"], "%Y-%m-%d").date()
-        for item in data: 
-            code = item.get("Code", "")
-            if code:
-                ALL_STOCK_DATA_CACHE[code[:4]] = item
             
         print(f"DEBUG成功: V2から {GLOBAL_LATEST_DATE} のデータを {len(ALL_STOCK_DATA_CACHE)} 件取得しました。")
         return True
