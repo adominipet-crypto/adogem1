@@ -17,23 +17,54 @@ GLOBAL_LATEST_DATE = None
 
 def fetch_all_stock_data_from_jquants():
     global GLOBAL_LATEST_DATE, ALL_STOCK_DATA_CACHE
+    
+    # トークンの存在チェック
+    if not JQ_REFRESH_TOKEN:
+        print("DEBUGエラー: GitHub Secretsに JQ_REFRESH_TOKEN が設定されていません。")
+        return False
+        
     try:
+        print("DEBUG: J-Quants IDトークンの取得を開始します...")
         res = requests.post(f"https://api.jquants.com/v1/auth/idtoken?refreshToken={JQ_REFRESH_TOKEN}", timeout=15)
+        
+        # ステータスコードの確認
+        print(f"DEBUG: IDトークン応答コード: {res.status_code}")
+        if res.status_code != 200:
+            print(f"DEBUGエラー: IDトークン取得に失敗しました。応答内容: {res.text}")
+            return False
+            
         id_token = res.json().get("idToken")
+        if not id_token:
+            print("DEBUGエラー: レスポンス内に idToken が見つかりません。")
+            return False
+            
+        print("DEBUG: 株価データの取得を開始します...")
         headers = {"Authorization": f"Bearer {id_token}"}
         res = requests.get("https://api.jquants.com/v1/prices/daily_quotes", headers=headers, timeout=30)
+        
+        print(f"DEBUG: 株価データ応答コード: {res.status_code}")
+        if res.status_code != 200:
+            print(f"DEBUGエラー: 株価データ取得に失敗しました。応答内容: {res.text}")
+            return False
+            
         data = res.json().get("daily_quotes", [])
-        if not data: return False
+        if not data:
+            print("DEBUGエラー: daily_quotes の中身が空です。")
+            return False
+            
         GLOBAL_LATEST_DATE = datetime.datetime.strptime(data[0]["Date"], "%Y-%m-%d").date()
-        for item in data: ALL_STOCK_DATA_CACHE[item["Code"][:4]] = item
-        print(f"DEBUG: {GLOBAL_LATEST_DATE} のデータを {len(ALL_STOCK_DATA_CACHE)} 件取得しました。")
+        for item in data: 
+            ALL_STOCK_DATA_CACHE[item["Code"][:4]] = item
+            
+        print(f"DEBUG成功: {GLOBAL_LATEST_DATE} のデータを {len(ALL_STOCK_DATA_CACHE)} 件取得しました。")
         return True
+        
     except Exception as e:
-        print(f"DEBUG: データ取得失敗 {e}")
+        print(f"DEBUG致命的エラー: 例外が発生しました。内容: {str(e)}")
         return False
 
 def run_logic():
-    # 1. スプレッドシート接続
+    print("DEBUG: スプレッドシート処理を開始します...")
     try:
         creds = Credentials.from_service_account_info(json.loads(os.environ.get('GCP_SA_KEY')), 
                       scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
@@ -41,10 +72,10 @@ def run_logic():
         records = sheet.get_all_values()
         print(f"DEBUG: シートから {len(records)} 行読み込みました。")
     except Exception as e:
-        print(f"DEBUG: シート接続エラー: {e}")
+        print(f"DEBUGエラー: シート接続に失敗しました: {e}")
         return
 
-    # 2. 答え合わせ処理
+    # 1. 答え合わせ処理
     cell_list = []
     for i, row in enumerate(records):
         if i > 0 and len(row) > 6 and row[6].strip() == "判定待ち":
@@ -55,15 +86,14 @@ def run_logic():
                 pct = ((next_close - price) / price) * 100
                 mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
                 cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:.2f}%")])
-                print(f"DEBUG: 銘柄 {code} 判定済み: {next_close}円, {mark}")
     
     if cell_list: 
         sheet.update_cells(cell_list)
-        print("DEBUG: 判定結果をシートに書き込みました。")
+        print(f"DEBUG: {len(cell_list)//3} 件の判定結果をシートに書き込みました。")
     else:
         print("DEBUG: 判定対象の銘柄（判定待ち）が見つかりませんでした。")
 
-    # 3. 新規銘柄追記（簡易スキャン）
+    # 2. 新規銘柄追記
     new_rows = []
     start, end = 1300, 10001
     for s in [str(i) for i in range(start, end)]:
@@ -76,16 +106,15 @@ def run_logic():
         sheet.append_rows(new_rows)
         print(f"DEBUG: 新規銘柄 {len(new_rows)} 件を追記しました。")
     else:
-        print("DEBUG: 新規条件合致銘柄が見つかりませんでした。")
+        print("DEBUG: 条件に合う新規銘柄がありませんでした。")
 
-    # 4. メール送信
+    # 3. メール送信
     try:
-        print("DEBUG: メール送信開始...")
         msg = MIMEMultipart()
         msg['Subject'] = "adoGEM スキャン結果通知"
         msg['From'] = SENDER_EMAIL
         msg['To'] = SENDER_EMAIL
-        body = f"本日のスキャンが完了しました。\n判定対象銘柄数: {len(cell_list)/3}件\n新規追加銘柄数: {len(new_rows)}件"
+        body = f"本日のスキャンが完了しました。\n判定対象銘柄数: {len(cell_list)//3}件\n新規追加銘柄数: {len(new_rows)}件"
         msg.attach(MIMEText(body, 'plain'))
         
         server = smtplib.SMTP("smtp.gmail.com", 587)
@@ -93,12 +122,12 @@ def run_logic():
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
         server.quit()
-        print("DEBUG: メール送信成功")
+        print("DEBUG: メール送信に成功しました。")
     except Exception as e:
-        print(f"DEBUG: メール送信失敗: {e}")
+        print(f"DEBUGエラー: メール送信に失敗しました: {e}")
 
 if __name__ == "__main__": 
     if fetch_all_stock_data_from_jquants(): 
         run_logic()
     else:
-        print("DEBUG: データ取得失敗のため処理中断")
+        print("DEBUG: データ取得失敗のため処理を終了します。")
