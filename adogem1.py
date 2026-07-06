@@ -10,7 +10,8 @@ from google.oauth2.service_account import Credentials
 # --- 環境設定 ---
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
-JQ_REFRESH_TOKEN = os.environ.get('JQ_REFRESH_TOKEN')
+# GitHub Secretsの「JQ_REFRESH_TOKEN」に入力したAPIキーをここで読み込みます
+JQ_API_KEY = os.environ.get('JQ_REFRESH_TOKEN')
 
 ALL_STOCK_DATA_CACHE = {}
 GLOBAL_LATEST_DATE = None
@@ -18,38 +19,19 @@ GLOBAL_LATEST_DATE = None
 def fetch_all_stock_data_from_jquants():
     global GLOBAL_LATEST_DATE, ALL_STOCK_DATA_CACHE
     
-    if not JQ_REFRESH_TOKEN:
-        print("DEBUGエラー: GitHub Secretsに JQ_REFRESH_TOKEN が設定されていません。")
+    if not JQ_API_KEY:
+        print("DEBUGエラー: GitHub Secretsに APIキー（JQ_REFRESH_TOKEN）が設定されていません。")
         return False
         
     try:
-        # 【V2修正】リフレッシュトークンを用いたIDトークン（V2用）の取得
-        print("DEBUG: J-Quants V2 トークンの取得を開始します...")
-        # V2ではエンドポイントが /v2/token になっているケース、または特定のパラメータを要求されるケースに対応
-        res = requests.post(f"https://api.jquants.com/v2/token?refreshToken={JQ_REFRESH_TOKEN}", timeout=15)
-        
-        # もし上記で403や404になる場合のセーフティとして、公式ドキュメントで推奨される代替パスも考慮
-        if res.status_code != 200:
-            res = requests.post("https://api.jquants.com/v2/auth/idtoken", json={"refreshToken": JQ_REFRESH_TOKEN}, timeout=15)
-        
-        print(f"DEBUG: V2 トークン応答コード: {res.status_code}")
-        if res.status_code != 200:
-            print(f"DEBUGエラー: トークン取得に失敗しました。応答: {res.text}")
-            return False
-            
-        id_token = res.json().get("idToken")
-        if not id_token:
-            print("DEBUGエラー: レスポンス内に idToken が見つかりません。")
-            return False
-            
-        # 【V2修正】株価データ（daily_quotes）の取得
-        print("DEBUG: J-Quants V2 株価データの取得を開始します...")
-        headers = {"Authorization": f"Bearer {id_token}"}
+        print("DEBUG: J-Quants V2 APIキーを用いた株価データの取得を開始します...")
+        # 【V2完全準拠】x-api-key ヘッダーに直接APIキーをセットしてリクエスト
+        headers = {"x-api-key": JQ_API_KEY}
         res = requests.get("https://api.jquants.com/v2/prices/daily_quotes", headers=headers, timeout=30)
         
         print(f"DEBUG: 株価データ応答コード: {res.status_code}")
         if res.status_code != 200:
-            print(f"DEBUGエラー: 株価データ取得に失敗。応答: {res.text}")
+            print(f"DEBUGエラー: 株価データ取得に失敗しました。応答: {res.text}")
             return False
             
         data = res.json().get("daily_quotes", [])
