@@ -26,23 +26,24 @@ def fetch_all_stock_data_from_jquants():
         headers = {"x-api-key": JQ_API_KEY}
         res = None
         
-        # 【V2仕様変更】まずはPremiumプラン用のURLで試す
-        print("DEBUG: J-Quants V2 (Premium) の株価データ取得を試みます...")
-        res = requests.get("https://api.jquants.com/v2/prices/daily_quotes/premium", headers=headers, timeout=30)
+        # 【V2正式仕様】/v2/market/daily_prices に変更。まずはpremiumプランで試す
+        print("DEBUG: J-Quants V2 (Premium) の株価データ取得を開始します...")
+        res = requests.get("https://api.jquants.com/v2/market/daily_prices?plan=premium", headers=headers, timeout=30)
         
-        # もし403や404エラー（プラン不一致）なら、Lightプラン用のURLで再試行
+        # 403や404であれば、lightプラン用パラメータで再試行
         if res.status_code != 200:
-            print(f"DEBUG: Premiumで取得不可（コード:{res.status_code}）。Lightプラン用URLで再試行します...")
-            res = requests.get("https://api.jquants.com/v2/prices/daily_quotes/light", headers=headers, timeout=30)
+            print(f"DEBUG: Premiumで取得不可（コード:{res.status_code}）。Lightプラン用で再試行します...")
+            res = requests.get("https://api.jquants.com/v2/market/daily_prices?plan=light", headers=headers, timeout=30)
         
         print(f"DEBUG: 株価データ最終応答コード: {res.status_code}")
         if res.status_code != 200:
             print(f"DEBUGエラー: 株価データ取得に失敗しました。応答: {res.text}")
             return False
             
-        data = res.json().get("daily_quotes", [])
+        # V2のデータキー名は daily_prices になっています
+        data = res.json().get("daily_prices", [])
         if not data:
-            print("DEBUGエラー: daily_quotes の中身が空です。")
+            print("DEBUGエラー: daily_prices の中身が空です。")
             return False
             
         GLOBAL_LATEST_DATE = datetime.datetime.strptime(data[0]["Date"], "%Y-%m-%d").date()
