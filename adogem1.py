@@ -23,13 +23,18 @@ def fetch_all_stock_data_from_jquants():
         return False
         
     try:
-        # 【V2修正】IDトークン取得URLを /v2/auth/idtoken に変更
-        print("DEBUG: J-Quants V2 IDトークンの取得を開始します...")
-        res = requests.post(f"https://api.jquants.com/v2/auth/idtoken?refreshToken={JQ_REFRESH_TOKEN}", timeout=15)
+        # 【V2修正】リフレッシュトークンを用いたIDトークン（V2用）の取得
+        print("DEBUG: J-Quants V2 トークンの取得を開始します...")
+        # V2ではエンドポイントが /v2/token になっているケース、または特定のパラメータを要求されるケースに対応
+        res = requests.post(f"https://api.jquants.com/v2/token?refreshToken={JQ_REFRESH_TOKEN}", timeout=15)
         
-        print(f"DEBUG: V2 IDトークン応答コード: {res.status_code}")
+        # もし上記で403や404になる場合のセーフティとして、公式ドキュメントで推奨される代替パスも考慮
         if res.status_code != 200:
-            print(f"DEBUGエラー: IDトークン取得に失敗。応答: {res.text}")
+            res = requests.post("https://api.jquants.com/v2/auth/idtoken", json={"refreshToken": JQ_REFRESH_TOKEN}, timeout=15)
+        
+        print(f"DEBUG: V2 トークン応答コード: {res.status_code}")
+        if res.status_code != 200:
+            print(f"DEBUGエラー: トークン取得に失敗しました。応答: {res.text}")
             return False
             
         id_token = res.json().get("idToken")
@@ -37,7 +42,7 @@ def fetch_all_stock_data_from_jquants():
             print("DEBUGエラー: レスポンス内に idToken が見つかりません。")
             return False
             
-        # 【V2修正】株価取得URLを /v2/prices/daily_quotes に変更
+        # 【V2修正】株価データ（daily_quotes）の取得
         print("DEBUG: J-Quants V2 株価データの取得を開始します...")
         headers = {"Authorization": f"Bearer {id_token}"}
         res = requests.get("https://api.jquants.com/v2/prices/daily_quotes", headers=headers, timeout=30)
@@ -52,10 +57,8 @@ def fetch_all_stock_data_from_jquants():
             print("DEBUGエラー: daily_quotes の中身が空です。")
             return False
             
-        # V2でも日付キー "Date"、コードキー "Code" は基本的に維持されています
         GLOBAL_LATEST_DATE = datetime.datetime.strptime(data[0]["Date"], "%Y-%m-%d").date()
         for item in data: 
-            # 各キーがV2で大文字小文字等の変更があっても対応できるよう、念のため取得
             code = item.get("Code", "")
             if code:
                 ALL_STOCK_DATA_CACHE[code[:4]] = item
@@ -85,7 +88,6 @@ def run_logic():
         if i > 0 and len(row) > 6 and row[6].strip() == "判定待ち":
             code = row[1]
             if code in ALL_STOCK_DATA_CACHE:
-                # V2でキーが変更された場合に備え、.get()で安全に取得
                 item = ALL_STOCK_DATA_CACHE[code]
                 close_val = item.get("Close") or item.get("AdjustmentClose")
                 if close_val is None: continue
