@@ -10,7 +10,7 @@ from google.oauth2.service_account import Credentials
 # --- 環境設定 ---
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
-JQ_API_KEY = os.environ.get('JQ_REFRESH_TOKEN') # V2のAPIキーが設定されている前提
+JQ_API_KEY = os.environ.get('JQ_REFRESH_TOKEN')
 
 ALL_STOCK_DATA_CACHE = {}
 GLOBAL_LATEST_DATE = None
@@ -23,7 +23,6 @@ def fetch_all_stock_data_from_jquants():
         return False
         
     try:
-        # 日本時間の現在時刻を取得
         now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
         headers = {"x-api-key": JQ_API_KEY}
         
@@ -32,19 +31,19 @@ def fetch_all_stock_data_from_jquants():
         
         print("DEBUG: J-Quants V2 公式仕様（/v2/equities/bars/daily）でのデータ取得を開始します...")
         
-        # 土日・祝日や夕方前の未反映を考慮し、直近5日間を遡って最も新しい営業日のデータを取得する
         for i in range(5):
             target_date = (now - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
-            
-            # 【V2仕様】必須パラメータ「date」を指定
             url = f"https://api.jquants.com/v2/equities/bars/daily?date={target_date}"
             print(f"DEBUG: {target_date} のデータ取得を試みます...")
             
             res = requests.get(url, headers=headers, timeout=30)
             
+            # 応答コードを必ず出力
+            print(f"DEBUG: 応答コード {res.status_code}")
+            
             if res.status_code == 200:
-                # 【V2仕様】データキーは「daily_quotes」
-                data = res.json().get("daily_quotes", [])
+                # 【V2仕様】データキーは「data」
+                data = res.json().get("data", [])
                 if data:
                     GLOBAL_LATEST_DATE = datetime.datetime.strptime(target_date, "%Y-%m-%d").date()
                     for item in data:
@@ -52,17 +51,20 @@ def fetch_all_stock_data_from_jquants():
                         if code:
                             ALL_STOCK_DATA_CACHE[code[:4]] = item
                     success = True
+                    print(f"DEBUG成功: {target_date} のデータを {len(ALL_STOCK_DATA_CACHE)} 件取得しました。")
                     break
-            elif res.status_code == 403:
-                print(f"DEBUGエラー: {target_date} で403 Forbidden。APIキーが無効か、エンドポイント指定に問題があります。")
+                else:
+                    print(f"DEBUG: {target_date} は休場日等のためデータが空でした。")
+            else:
+                # 400や401などの場合、明確なエラーメッセージを出力
+                print(f"DEBUGエラー: {target_date} の取得に失敗しました。応答: {res.text}")
         
         if not success:
-            status = res.status_code if res else "None"
-            body = res.text if res else "None"
-            print(f"DEBUGエラー: 直近5日分の株価データが取得できませんでした。最終ステータス: {status}, 応答: {body}")
+            status = res.status_code if res is not None else "None"
+            body = res.text if res is not None else "None"
+            print(f"DEBUG致命的エラー: 直近5日分の株価データが取得できませんでした。最終ステータス: {status}, 応答: {body}")
             return False
             
-        print(f"DEBUG成功: V2から {GLOBAL_LATEST_DATE} のデータを {len(ALL_STOCK_DATA_CACHE)} 件取得しました。")
         return True
         
     except Exception as e:
@@ -88,7 +90,9 @@ def run_logic():
             code = row[1]
             if code in ALL_STOCK_DATA_CACHE:
                 item = ALL_STOCK_DATA_CACHE[code]
-                close_val = item.get("Close") or item.get("AdjustmentClose")
+                
+                # 【V2仕様】カラム短縮対応（C = Close等）
+                close_val = item.get("C") or item.get("Close") or item.get("AdjustmentClose")
                 if close_val is None: continue
                 
                 next_close = float(close_val)
@@ -110,9 +114,10 @@ def run_logic():
         if 1300 <= int(s) <= 1600: continue
         item = ALL_STOCK_DATA_CACHE.get(s)
         if item:
-            open_val = item.get("Open") or item.get("AdjustmentOpen")
-            close_val = item.get("Close") or item.get("AdjustmentClose")
-            volume_val = item.get("Volume") or item.get("AdjustmentVolume", 0)
+            # 【V2仕様】カラム短縮対応
+            open_val = item.get("O") or item.get("Open") or item.get("AdjustmentOpen")
+            close_val = item.get("C") or item.get("Close") or item.get("AdjustmentClose")
+            volume_val = item.get("Vo") or item.get("Volume") or item.get("AdjustmentVolume", 0)
             
             if open_val and close_val and float(volume_val) >= 50000 and float(open_val) < float(close_val):
                 new_rows.append([GLOBAL_LATEST_DATE.strftime("%Y-%m-%d"), s, "9.当日陽線", "通常", float(close_val), "", "判定待ち", ""])
