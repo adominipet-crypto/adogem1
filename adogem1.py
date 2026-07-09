@@ -85,22 +85,24 @@ def get_next_trading_day_data(symbol, base_date):
     df = get_stock_data_fallback(symbol, force_check_date=False)
     return df[df.index.date > base_date].iloc[0] if df is not None and not df[df.index.date > base_date].empty else None
 
-# --- 新しい日経平均取得ロジック ---
+# --- 更新された日経平均取得ロジック ---
 def get_nikkei_evaluation_line():
     try:
-        url = "https://query1.finance.yahoo.com/v8/finance/chart/^N225?range=1mo&interval=1d"
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/^N225?range=5d&interval=1d"
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
         data = res.json()["chart"]["result"][0]
         close = data["indicators"]["quote"][0]["close"]
         ts = data["timestamp"]
         df = pd.DataFrame({"Close": close}, index=[datetime.datetime.fromtimestamp(t).date() for t in ts]).dropna()
-        if len(df) < 2: return "【日経平均の判定】\n  データ件数不足"
+        
         curr_val = df.iloc[-1]["Close"]
         prev_val = df.iloc[-2]["Close"]
         curr_date = df.index[-1]
         prev_date = df.index[-2]
+            
         pct = ((curr_val - prev_val) / prev_val) * 100
         mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
+        
         return f"【日経平均の判定】\n  {mark} | NIKKEI225 | {int(prev_val)}円 ({prev_date.strftime('%m-%d')}) → {int(curr_val)}円 ({curr_date.strftime('%m-%d')}) ({pct:+.2f}%)"
     except Exception as e:
         return f"【日経平均の判定】\n  自動取得エラー: {e}"
