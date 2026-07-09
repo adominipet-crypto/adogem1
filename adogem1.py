@@ -28,7 +28,10 @@ STAGE_LABELS = {
     "stage6": "6.溜め", "stage7": "7.右肩上がり", "stage8": "8.長期トレンド", 
     "stage9": "9.当日陽線", "completed_pass": "完全合格"
 }
-stage_stats_counter = {6: {"◎": 0, "◯": 0, "▲": 0, "✕": 0}, 7: {"◎": 0, "◯": 0, "▲": 0, "✕": 0}, 8: {"◎": 0, "◯": 0, "▲": 0, "✕": 0}, 9: {"◎": 0, "◯": 0, "▲": 0, "✕": 0}}
+stage_stats_counter = {
+    6: {"◎": 0, "◯": 0, "▲": 0, "✕": 0}, 7: {"◎": 0, "◯": 0, "▲": 0, "✕": 0}, 
+    8: {"◎": 0, "◯": 0, "▲": 0, "✕": 0}, 9: {"◎": 0, "◯": 0, "▲": 0, "✕": 0}
+}
 
 # --- 共通関数 ---
 def fetch_global_latest_date():
@@ -82,6 +85,7 @@ def get_next_trading_day_data(symbol, base_date):
     df = get_stock_data_fallback(symbol, force_check_date=False)
     return df[df.index.date > base_date].iloc[0] if df is not None and not df[df.index.date > base_date].empty else None
 
+# --- 新しい日経平均取得ロジック ---
 def get_nikkei_evaluation_line():
     try:
         url = "https://query1.finance.yahoo.com/v8/finance/chart/^N225?range=1mo&interval=1d"
@@ -90,12 +94,16 @@ def get_nikkei_evaluation_line():
         close = data["indicators"]["quote"][0]["close"]
         ts = data["timestamp"]
         df = pd.DataFrame({"Close": close}, index=[datetime.datetime.fromtimestamp(t).date() for t in ts]).dropna()
-        curr_date, prev_date = GLOBAL_LATEST_DATE, get_previous_trading_day(GLOBAL_LATEST_DATE)
-        curr_val, prev_val = df.loc[curr_date, "Close"], df.loc[prev_date, "Close"]
+        if len(df) < 2: return "【日経平均の判定】\n  データ件数不足"
+        curr_val = df.iloc[-1]["Close"]
+        prev_val = df.iloc[-2]["Close"]
+        curr_date = df.index[-1]
+        prev_date = df.index[-2]
         pct = ((curr_val - prev_val) / prev_val) * 100
         mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
         return f"【日経平均の判定】\n  {mark} | NIKKEI225 | {int(prev_val)}円 ({prev_date.strftime('%m-%d')}) → {int(curr_val)}円 ({curr_date.strftime('%m-%d')}) ({pct:+.2f}%)"
-    except Exception as e: return f"【日経平均の判定】\n  自動取得エラー: {e}"
+    except Exception as e:
+        return f"【日経平均の判定】\n  自動取得エラー: {e}"
 
 def update_yesterday_results():
     global stage_results_report, stage_stats_counter
