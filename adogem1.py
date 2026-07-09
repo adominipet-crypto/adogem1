@@ -54,9 +54,7 @@ def connect_spreadsheet(sheet_name=None):
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     gcp_key = os.environ.get('GCP_SA_KEY')
     if not gcp_key: raise ValueError("GCP_SA_KEY が設定されていません。")
-    
     creds = Credentials.from_service_account_info(json.loads(gcp_key), scopes=scopes) if gcp_key.startswith('{') else Credentials.from_service_account_file(gcp_key, scopes=scopes)
-    
     spreadsheet = gspread.authorize(creds).open("26.5.23_adoGEM_検証ログ")
     sheet_name = sheet_name or f"{GLOBAL_LATEST_DATE.month}月"
     try: return spreadsheet.worksheet(sheet_name)
@@ -106,12 +104,10 @@ def update_yesterday_results():
         all_records = sheet.get_all_values()
         cell_list = []
         target_match_date = get_previous_trading_day(GLOBAL_LATEST_DATE) if GLOBAL_LATEST_DATE else None
-        
         for i, row in enumerate(all_records):
             if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
             code, sel_date = row[1], datetime.datetime.strptime(row[0], "%Y-%m-%d").date()
             if target_match_date and sel_date != target_match_date: continue
-            
             next_data = get_next_trading_day_data(code, sel_date)
             if next_data is not None:
                 next_close, selected_price = int(next_data['Close']), int(row[4])
@@ -131,21 +127,48 @@ def analyze_stock(symbol):
     if idx < 100: return "SKIP"
     c, o, v = df['Close'], df['Open'], df['Volume']
     ma5, ma20, ma60, ma100, ma300 = c.rolling(5).mean(), c.rolling(20).mean(), c.rolling(60).mean(), c.rolling(100).mean(), c.rolling(300).mean()
-
     stage_survivors["stage1"] += 1
     if c.iloc[idx] <= ma60.iloc[idx] or v.iloc[idx] < 50000 or c.iloc[idx] <= ma5.iloc[idx]: return "SKIP"
     stage_survivors.update({"stage2": stage_survivors["stage2"]+1, "stage3": stage_survivors["stage3"]+1, "stage4": stage_survivors["stage4"]+1})
-    
     if not any(c.iloc[i] > ma20.iloc[i] and c.iloc[i-1] <= ma20.iloc[i-1] for i in range(idx - 6, idx + 1) if i >= 1): return "SKIP"
     stage_survivors["stage5"] += 1
-    
     ppp = "★PPP " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0)) else ("★PPP(Short) " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx]) else "")
     date_str = df.index[idx].strftime("%Y-%m-%d")
-    
     for cond, stage, key in [(c.iloc[prev_idx] < ma5.iloc[prev_idx], "stage6", "stage6"), (ma60.iloc[idx] > ma60.iloc[prev_idx], "stage7", "stage7"), (ma100.iloc[idx] > ma100.iloc[prev_idx], "stage8", "stage8"), (o.iloc[idx] < c.iloc[idx], "stage9", "stage9")]:
         if not cond:
             sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": key, "ppp_label": ppp, "date": date_str}; return "SKIP"
         stage_survivors[stage] += 1
-    
     sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "completed_pass", "ppp_label": ppp, "date": date_str}
-    selected_stocks[symbol] =
+    selected_stocks[symbol] = {"price": int(c.iloc[idx]), "ppp_label": ppp, "date": date_str}
+    if "★PPP " in ppp: stats["★PPP"] += 1
+    elif "★PPP(Short) " in ppp: stats["★PPP(Short)"] += 1
+    else: stats["normal_detect"] += 1
+    return "OK"
+
+def main():
+    fetch_global_latest_date()
+    update_yesterday_results()
+    for s in [str(i) for i in range(int(sys.argv[1]), int(sys.argv[2])) if not 1300 <= int(i) <= 1600]: analyze_stock(s)
+    sheet = connect_spreadsheet()
+    sheet.append_rows([[r["date"], c, {"stage6": "6. 溜め", "stage7": "7. 右肩上がり", "stage8": "8. 長期トレンド", "stage9": "9. 当日陽線", "completed_pass": "9. 当日陽線"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for c, r in sheet1_final_log.items() if r["stage_key"] in ["stage6", "stage7", "stage8", "stage9", "completed_pass"]], value_input_option='RAW')
+    newline = "\n"
+    final_list_str = newline.join([f"  {'★PPP ' in s['ppp_label'] and s['ppp_label'] or ''}■ {code} | {s['price']}円 ({s['date'][5:]})" for code, s in sorted(selected_stocks.items())])
+    judgement_lines = []
+    for key in ["stage6", "stage7", "stage8", "stage9", "completed_pass"]:
+        judgement_lines.append(f"■ {STAGE_LABELS[key]}")
+        judgement_lines.extend(stage_results_report.get(key) or ["  該当なし"])
+        judgement_lines.append("")
+    body = (f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}\n総対象: {int(sys.argv[2])-int(sys.argv[1])}件\n\n【各ステージ生存数】\n" + 
+            newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "月足60", "出来高", "下半身", "MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) + 
+            f"\n\n★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
+            f"{get_nikkei_evaluation_line()}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n--------------------------------------------------")
+    msg = MIMEMultipart()
+    msg['From'], msg['To'], msg['Subject'] = SENDER_EMAIL, SENDER_EMAIL, f"📊 adoGEM レポート"
+    msg.attach(MIMEText(body, 'plain'))
+    server = smtplib.SMTP("smtp.gmail.com", 587)
+    server.starttls()
+    server.login(SENDER_EMAIL, SENDER_PASSWORD)
+    server.send_message(msg)
+    server.quit()
+
+if __name__ == "__main__": main()
