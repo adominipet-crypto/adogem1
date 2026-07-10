@@ -124,9 +124,17 @@ def update_yesterday_results():
                 pct = ((next_close - selected_price) / selected_price) * 100
                 mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
                 cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
+                
+                # 判定結果のレポート追加
                 s_key = {"6. 溜め": "stage6", "7. 右肩上がり": "stage7", "8. 長期トレンド": "stage8", "9. 当日陽線": "stage9"}.get(row[2], "completed_pass")
                 ppp_prefix = f"{row[3].strip()} " if row[3].strip() in ["★PPP", "★PPP(Short)"] else ""
                 stage_results_report[s_key].append(f"  {ppp_prefix}{mark} ■ {code} | {selected_price}円 ({row[0][5:]}) → {next_close}円 ({pct:+.2f}%)")
+                
+                # 6〜9の判定結果カウンター更新
+                stage_match = {"6. 溜め": 6, "7. 右肩上がり": 7, "8. 長期トレンド": 8, "9. 当日陽線": 9}.get(row[2])
+                if stage_match:
+                    stage_stats_counter[stage_match][mark] += 1
+                    
         if cell_list: sheet.update_cells(cell_list)
     except Exception as e: print(f"判定エラー: {e}")
 
@@ -159,19 +167,35 @@ def main():
     fetch_global_latest_date()
     update_yesterday_results()
     for s in [str(i) for i in range(int(sys.argv[1]), int(sys.argv[2])) if not 1300 <= int(i) <= 1600]: analyze_stock(s)
+    
+    # 変更点: スプレッドシートへの書き込みを「7以降」に変更
     sheet = connect_spreadsheet()
-    sheet.append_rows([[r["date"], c, {"stage6": "6. 溜め", "stage7": "7. 右肩上がり", "stage8": "8. 長期トレンド", "stage9": "9. 当日陽線", "completed_pass": "9. 当日陽線"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for c, r in sheet1_final_log.items() if r["stage_key"] in ["stage6", "stage7", "stage8", "stage9", "completed_pass"]], value_input_option='RAW')
+    sheet.append_rows([[r["date"], c, {"stage7": "7. 右肩上がり", "stage8": "8. 長期トレンド", "stage9": "9. 当日陽線", "completed_pass": "9. 当日陽線"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for c, r in sheet1_final_log.items() if r["stage_key"] in ["stage7", "stage8", "stage9", "completed_pass"]], value_input_option='RAW')
+    
     newline = "\n"
     final_list_str = newline.join([f"  {'★PPP ' in s['ppp_label'] and s['ppp_label'] or ''}■ {code} | {s['price']}円 ({s['date'][5:]})" for code, s in sorted(selected_stocks.items())])
+    
+    # 追加: 6〜9の判定結果割合出力文字列作成
+    ratio_lines = ["【6〜9の判定結果】"]
+    for stg in range(6, 10):
+        counts = stage_stats_counter[stg]
+        total = sum(counts.values())
+        win = counts['◎'] + counts['◯']
+        ratio = int((win / total * 100)) if total > 0 else 0
+        ratio_lines.append(f"{stg}. ◎{counts['◎']} / ◯{counts['◯']} / ▲{counts['▲']} / ✕{counts['✕']} / ◎◯{ratio}%")
+    ratio_str = "\n".join(ratio_lines)
+    
     judgement_lines = []
     for key in ["stage6", "stage7", "stage8", "stage9", "completed_pass"]:
         judgement_lines.append(f"■ {STAGE_LABELS[key]}")
         judgement_lines.extend(stage_results_report.get(key) or ["  該当なし"])
         judgement_lines.append("")
+        
     body = (f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}\n総対象: {int(sys.argv[2])-int(sys.argv[1])}件\n\n【各ステージ生存数】\n" + 
             newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "月足60", "出来高", "下半身", "MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) + 
             f"\n\n★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
-            f"{get_nikkei_evaluation_line()}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n--------------------------------------------------")
+            f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n--------------------------------------------------")
+    
     msg = MIMEMultipart()
     msg['From'], msg['To'], msg['Subject'] = SENDER_EMAIL, SENDER_EMAIL, f"📊 adoGEM レポート"
     msg.attach(MIMEText(body, 'plain'))
