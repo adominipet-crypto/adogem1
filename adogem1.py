@@ -180,10 +180,10 @@ def main():
     
     header_text = (
         f"サバイバル投資家adoGEM \n"
-        f"{date_str_formatted}のオススメ銘柄 \n"
+        f"{date_str_formatted}私の推し銘柄 \n"
         f"Survival Investor adoGEM: \n"
         f"Recommended Stocks for {date_str_en} \n"
-        f"我的首首选股\n\n"
+        f"我的首选股\n\n"
     )
     
     # 条件一覧および判定基準テキストの追加
@@ -234,8 +234,8 @@ def main():
             newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "月足60", "出来高", "下半身", "MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) + 
             f"\n\n★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
-            f"\n#株 #日経平均 #投資初心者 #資産運用 #adoGEM #Nikkei #StockMarket  #DayTrading #Investing #TradingStrategy\n" +
-            f"#股票 #日经平均指数 #投资入门 #资产管理\n" +
+            f"\n#株 #日経平均 #投資家 #資産運用 #adoGEM #Nikkei #StockMarket  #SwingTrading #Investing #TradingStrategy\n" +
+            f"#股票 #日经平均指数 #投资者 #资产管理\n" +
             "--------------------------------------------------")
     
     msg = MIMEMultipart()
