@@ -183,7 +183,26 @@ def main():
         f"{date_str_formatted}のオススメ銘柄 \n"
         f"Survival Investor adoGEM: \n"
         f"Recommended Stocks for {date_str_en} \n"
-        f"我的首选股\n\n"
+        f"我的首首选股\n\n"
+    )
+    
+    # 条件一覧および判定基準テキストの追加
+    conditions_text = (
+        "【条件一覧】\n"
+        "1. 全データ取得成功\n"
+        "2. 月足MA60上抜け\n"
+        "3. 出来高5万株以上\n"
+        "4. 下半身(終値>MA5)\n"
+        "5. MA20上抜け後7日以内\n"
+        "6. 溜め(前日終値<MA5)\n"
+        "7. 右肩上がり(MA60)\n"
+        "8. 長期トレンド(MA100上昇)\n"
+        "9. 当日陽線(始値<終値)\n\n"
+        "【判定結果マーク基準】翌日終値\n"
+        " ◎ ： +2.0%以上\n"
+        " ◯ ： +0.1%〜+2.0%\n"
+        " ▲ ： -0.1%〜+0.1%\n"
+        " ✕ ： -0.1%未満\n\n"
     )
     
     for s in [str(i) for i in range(int(sys.argv[1]), int(sys.argv[2])) if not 1300 <= int(i) <= 1600]: analyze_stock(s)
@@ -210,6 +229,7 @@ def main():
         judgement_lines.append("")
         
     body = (f"{header_text}" + 
+            f"{conditions_text}" +
             f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}\n総対象: {int(sys.argv[2])-int(sys.argv[1])}件\n\n【各ステージ生存数】\n" + 
             newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "月足60", "出来高", "下半身", "MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) + 
             f"\n\n★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
