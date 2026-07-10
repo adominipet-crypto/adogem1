@@ -179,31 +179,8 @@ def main():
     date_str_en = next_day.strftime("%B %d, %y")
     
     header_text = (
-        f"サバイバル投資家adoGEM \n"
-        f"{date_str_formatted}私の推し銘柄 \n"
-        f"Survival Investor adoGEM: \n"
-        f"Recommended Stocks for {date_str_en} \n"
-        f"我的首选股\n\n"
-    )
-    
-    # 条件一覧および判定基準テキストの追加
-    conditions_text = (
-        "【条件一覧】\n"
-        "1. 全データ取得成功\n"
-        "2. 月足MA60上抜け\n"
-        "3. 出来高5万株以上\n"
-        "4. 下半身(終値>MA5)\n"
-        "5. MA20上抜け後7日以内\n"
-        "6. 溜め(前日終値<MA5)\n"
-        "7. 右肩上がり(MA60)\n"
-        "8. 長期トレンド(MA100上昇)\n"
-        "9. 当日陽線(始値<終値)\n\n"
-        "【判定結果マーク基準】翌日終値\n"
-        " ◎ ： +2.0%以上\n"
-        " ◯ ： +0.1%〜+2.0%\n"
-        " ▲ ： -0.1%〜+0.1%\n"
-        " ✕ ： -0.1%未満\n\n"
-    )
+        f"サバイバル投資家adoGEM \n")
+
     
     for s in [str(i) for i in range(int(sys.argv[1]), int(sys.argv[2])) if not 1300 <= int(i) <= 1600]: analyze_stock(s)
     
@@ -231,12 +208,36 @@ def main():
     body = (f"{header_text}" + 
             f"{conditions_text}" +
             f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}\n総対象: {int(sys.argv[2])-int(sys.argv[1])}件\n\n【各ステージ生存数】\n" + 
-            newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "月足60", "出来高", "下半身", "MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) + 
+            newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "月足60", "出来高", "下半身", "MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) +
+            f"サバイバル投資家adoGEM \n"
+            f"{date_str_formatted}私の推し銘柄 \n"
+            f"Survival Investor adoGEM: \n"
+            f"Recommended Stocks for {date_str_en} \n"
+            f"我的首选股\n\n") +
             f"\n\n★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
             f"\n#株 #日経平均 #投資家 #資産運用 #adoGEM #Nikkei #StockMarket  #SwingTrading #Investing #TradingStrategy\n" +
             f"#股票 #日经平均指数 #投资者 #资产管理\n" +
             "--------------------------------------------------")
+        
+    # 条件一覧および)テキストの追加
+    conditions_text = (
+        "【条件一覧】\n"
+        "1. 全データ取得成功\n"
+        "2. 月足MA60上抜け\n"
+        "3. 出来高5万株以上\n"
+        "4. 下半身(終値>MA5)\n"
+        "5. MA20上抜け後7日以内\n"
+        "6. 溜め(前日終値<MA5)\n"
+        "7. 右肩上がり(MA60)\n"
+        "8. 長期トレンド(MA100上昇)\n"
+        "9. 当日陽線(始値<終値)\n\n"
+        "【判定結果マーク基準】翌日終値\n"
+        " ◎ ： +2.0%以上\n"
+        " ◯ ： +0.1%〜+2.0%\n"
+        " ▲ ： -0.1%〜+0.1%\n"
+        " ✕ ： -0.1%未満\n\n"
+    )
     
     msg = MIMEMultipart()
     msg['From'], msg['To'], msg['Subject'] = SENDER_EMAIL, SENDER_EMAIL, f"📊 adoGEM レポート"
