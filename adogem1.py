@@ -207,8 +207,8 @@ def main():
             f"{conditions_text}\n\n" +
             f"{date_str_formatted}私の推し銘柄\n" +
             f"Survival Investor adoGEM:\nRecommended Stocks for {date_str_en}\n我的首选股\n\n" +
-            f"#株 #日経平均 #投資 #adoGEM #Nikkei #StockMarket #SwingTrading #Investing\n" +
-            f"#股票 #日经平均指数 #投资者\n" +
+            f"#株 #日本株 #adoGEM #不労所得\n" +
+            f"#股票\n" +
             "--------------------------------------------------")
         
     msg = MIMEMultipart()
