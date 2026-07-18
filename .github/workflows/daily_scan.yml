@@ -1,9 +1,9 @@
 name: adoGEM Full Scan Continuous
 
 on:
-  schedule:
+  # schedule:
     # 日本時間 毎週月〜金の 5:52 PM (UTC 月〜金の 08:52)
-    - cron: '52 08 * * 1-5'
+    #- cron: '52 08 * * 1-5'
   workflow_dispatch: # 手動実行ボタン
 
 jobs:
