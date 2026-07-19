@@ -205,10 +205,9 @@ def main():
             f"★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
             f"{conditions_text}\n\n" +
-            f"{date_str_formatted}私の推し銘柄\n" +
-            f"Survival Investor adoGEM:\nRecommended Stocks for {date_str_en}\n我的首选股\n\n" +
-            f"#株 #日本株 #adoGEM #不労所得\n" +
-            f"#股票\n" +
+            f"{next_day.month}/{next_day.day} 推し株銘柄({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
+            f"BGM: Created with Suno\n" +
+            f"#株 #日本株 #adoGEM #不労所得 #股票\n" +
             "--------------------------------------------------")
         
     msg = MIMEMultipart()
