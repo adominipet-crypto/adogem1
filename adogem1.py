@@ -206,8 +206,8 @@ def main():
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
             f"{conditions_text}\n\n" +
             f"{next_day.month}/{next_day.day} 推し株銘柄({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
-            f"Survival Investor adoGEM:Recommended Stocks\n +
-            f"我的首选股\n +
+            f"Survival Investor adoGEM:Recommended Stocks\n" +
+            f"我的首选股\n" +
             f"BGM: Created with Suno\n" +
             f"#株 #日本株 #adoGEM #不労所得 #股票\n" +
             "--------------------------------------------------")
