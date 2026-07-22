@@ -209,7 +209,8 @@ def main():
             f"Survival Investor adoGEM\n" +
             f"Recommended Stocks\n" +
             f"我的首选股\n" +
-            f"#株 #日本株 #adoGEM #不労所得 #股票 #shorts\n" +
+            f"#日本株 #adoGEM #不労所得 #股票 ＃投資サバイバル\n" +
+            f"#株 ＃サバイバル投資家\n" +
             f"BGM: Created with Suno\n" +
             "--------------------------------------------------")
         
