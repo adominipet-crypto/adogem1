@@ -212,10 +212,12 @@ def main():
             f"#日本株 #adoGEM #不労所得 #股票 ＃投資サバイバル\n" +
             f"#株 ＃サバイバル投資家\n" +
             f"BGM: Created with Suno\n" +
+            f"中文\n" +
             f"{next_day.month}/{next_day.day} 个人关注 {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}\n" +
             f"我是生存投资者\n" +
+            f"每天晚上9点左右进行直播\n" +
             f"该频道由一位开发了“adoGEM逻辑”的50多岁工薪族运营\n" +
-            f"我利用这套系统进行个人选号作为业余爱好，并分享次日的“个人关注”\n" +
+            f"我利用这套系统进行个人选号作为业余爱好，并分享次日的个人关注\n" +
             "--------------------------------------------------")
         
     msg = MIMEMultipart()
