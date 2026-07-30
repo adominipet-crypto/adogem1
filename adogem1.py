@@ -207,7 +207,7 @@ def main():
             f"{conditions_text}\n\n" +
             f"{next_day.month}/{next_day.day} 私の推し株銘柄({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
             f"Survival Investor adoGEM\n" +
-            f"Recommended Stocks\n" +
+            f"平日夜更新します〜 Recommended Stocks\n" +
             f"我的首选股\n" +
             f"#日本株 #adoGEM #不労所得 #股票 ＃投資サバイバル\n" +
             f"#株 ＃サバイバル投資家\n" +
