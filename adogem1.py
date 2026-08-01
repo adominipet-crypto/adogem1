@@ -208,16 +208,14 @@ def main():
             f"{next_day.month}/{next_day.day} 私の推し株銘柄({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
             f"Survival Investor adoGEM\n" +
             f"平日夜更新します〜 Recommended Stocks\n" +
-            f"我的首选股\n" +
             f"#日本株 #adoGEM #不労所得 #股票 ＃投資サバイバル\n" +
             f"#株 ＃サバイバル投資家\n" +
             f"BGM: Created with Suno\n" +
-            f"中文\n" +
+            f"中文版\n" +
             f"{next_day.month}/{next_day.day} 个人关注 {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}\n" +
-            f"我是生存投资者\n" +
-            f"每天晚上左右进行直播\n" +
-            f"该频道由一位开发了“adoGEM逻辑”50多岁工薪族运营\n" +
-            f"我利用这套系统进行个人选号作为业余爱好\n" +
+            f"/我是生存投资者\n" +
+            f"/节目每晚播出。\n" +
+            f"/这个频道是我创建的“adoGEM逻辑”由一位50多岁的上班族运营\n" +
             "--------------------------------------------------")
         
     msg = MIMEMultipart()
