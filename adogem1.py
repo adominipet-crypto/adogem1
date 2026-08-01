@@ -208,8 +208,8 @@ def main():
             f"{next_day.month}/{next_day.day} 私の推し株銘柄({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
             f"Survival Investor adoGEM\n" +
             f"平日夜更新します〜 Recommended Stocks\n" +
-            f"#日本株 #adoGEM #不労所得 #股票 ＃投資サバイバル\n" +
-            f"#株 ＃サバイバル投資家\n" +
+            f"#日本株 #adoGEM #不労所得 #股票 #投資サバイバル\n" +
+            f"#株 #サバイバル投資家\n" +
             f"BGM: Created with Suno\n" +
             f"中文版\n" +
             f"{next_day.month}/{next_day.day} 个人关注 {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}\n" +
