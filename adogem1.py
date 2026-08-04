@@ -207,7 +207,7 @@ def main():
             f"{conditions_text}\n\n" +
             f"{next_day.month}/{next_day.day} 私の推し株銘柄({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
             f"平日夜更新します〜\n" +
-            f"Lineで最新お届け👉️https://lin.ee/Xfawvom\n" +
+            f"Lineで最新お届け👉️@adoGEM-50S\n" +
             f"Survival Investor adoGEM\n" +
             f"#日本株 #adoGEM #不労所得 #股票 #サバイバル投資家\n" +
             f"#株 #投資サバイバル\n" +
