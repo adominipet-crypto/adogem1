@@ -16,7 +16,7 @@ SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 # --- グローバル変数 ---
 stage_survivors = {f"stage{i}": 0 for i in range(1, 10)}  
-stats = {"★PPP": 0, "★PPP(Short)": 0, "normal_detect": 0}
+stats = {"★": 0, "★(Short)": 0, "normal_detect": 0}
 sheet1_final_log = {}
 selected_stocks = {}
 GLOBAL_LATEST_DATE = None  
@@ -118,7 +118,7 @@ def update_yesterday_results():
                 mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
                 cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
                 s_key = {"6. 溜め": "stage6", "7. 右肩上がり": "stage7", "8. 長期トレンド": "stage8", "9. 当日陽線": "stage9"}.get(row[2], "completed_pass")
-                ppp_prefix = f"{row[3].strip()} " if row[3].strip() in ["★PPP", "★PPP(Short)"] else ""
+                ppp_prefix = f"{row[3].strip()} " if row[3].strip() in ["★", "★(Short)"] else ""
                 stage_results_report[s_key].append(f"  {ppp_prefix}{mark} ■ {code} | {selected_price}円 ({row[0][5:]}) → {next_close}円 ({pct:+.2f}%)")
                 stage_match = {"6. 溜め": 6, "7. 右肩上がり": 7, "8. 長期トレンド": 8, "9. 当日陽線": 9}.get(row[2])
                 if stage_match: stage_stats_counter[stage_match][mark] += 1
@@ -153,8 +153,8 @@ def analyze_stock(symbol):
         
     sheet1_final_log[symbol] = {"price": int(c.iloc[idx]), "stage_key": "completed_pass", "ppp_label": ppp, "date": date_str}
     selected_stocks[symbol] = {"price": int(c.iloc[idx]), "ppp_label": ppp, "date": date_str}
-    if "★PPP " in ppp: stats["★PPP"] += 1
-    elif "★PPP(Short) " in ppp: stats["★PPP(Short)"] += 1
+    if "★ " in ppp: stats["★"] += 1
+    elif "★(Short) " in ppp: stats["★(Short)"] += 1
     else: stats["normal_detect"] += 1
     return "OK"
 
@@ -202,7 +202,7 @@ def main():
     body = (f"サバイバル投資家adoGEM\n" + 
             f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}\n総対象: {int(sys.argv[2])-int(sys.argv[1])}件\n\n【各ステージ生存数】\n" + 
             newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "月足60", "出来高", "下半身", "MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) + "\n\n" +
-            f"★PPP: {stats['★PPP']} / Short: {stats['★PPP(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
+            f"★: {stats['★']} / Short: {stats['★(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
             f"{conditions_text}\n\n" +
             f"{next_day.month}/{next_day.day} 私の推し株銘柄({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
