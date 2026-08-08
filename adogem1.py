@@ -211,7 +211,7 @@ def main():
             f"平日夜更新します〜\n" +
             f"投資判断はご自身で\n" +
             f"Survival Investor adoGEM\n" +
-            f"#日本株 #adoGEM #不労所得 #股票 #サバイバル投資家\n" +
+            f"​#日本株 #株式投資 #サバイバル投資家 #サラリーマン投資家 #adoGEM\n" +
             f"BGM: Created with Suno\n" +
             f"----------------------\n" +
             f"中文版\n" +
