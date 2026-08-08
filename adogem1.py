@@ -143,7 +143,7 @@ def analyze_stock(symbol):
     if not any(c.iloc[i] > ma20.iloc[i] and c.iloc[i-1] <= ma20.iloc[i-1] for i in range(idx - 6, idx + 1) if i >= 1): return "SKIP"
     stage_survivors["stage5"] += 1
     
-    ppp = "★PPP " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0)) else ("★PPP(Short) " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx]) else "")
+    ppp = "★ " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0)) else ("★PPP(Short) " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx]) else "")
     date_str = df.index[idx].strftime("%Y-%m-%d")
     
     for cond, stage, key in [(c.iloc[prev_idx] < ma5.iloc[prev_idx], "stage6", "stage6"), (ma60.iloc[idx] > ma60.iloc[prev_idx], "stage7", "stage7"), (ma100.iloc[idx] > ma100.iloc[prev_idx], "stage8", "stage8"), (o.iloc[idx] < c.iloc[idx], "stage9", "stage9")]:
