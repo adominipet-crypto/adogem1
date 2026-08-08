@@ -215,7 +215,7 @@ def main():
             f"BGM: Created with Suno\n" +
             f"----------------------\n" +
             f"中文版\n" +
-            f"{next_day.month}/{next_day.day} 个人关注股票 {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 收盘数据\n" +
+            f"{next_day.month}/{next_day.day} 个人关注股票( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 收盘数据)\n" +
             f"50多岁上班族的adoGEM生存逻辑\n" +
             "--------------------------------------------------")
         
