@@ -215,11 +215,8 @@ def main():
             f"BGM: Created with Suno\n" +
             f"----------------------\n" +
             f"中文版\n" +
-            f"{next_day.month}/{next_day.day} 个人关注 {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}\n" +
-            f"/我是生存投资者\n" +
-            f"/节目每晚播出\n" +
-            f"/这个频道是我创建的“adoGEM逻辑”由一位50多岁的上班族运营\n" +
-            f"仅供参考,不构成投资建议\n" +
+            f"{next_day.month}/{next_day.day} 个人关注股票 {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 收盘数据\n" +
+            f"50多岁上班族的adoGEM生存逻辑\n" +
             "--------------------------------------------------")
         
     msg = MIMEMultipart()
