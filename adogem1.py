@@ -207,12 +207,12 @@ def main():
             f"★: {stats['★']} / Short: {stats['★(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
             f"{conditions_text}\n\n" +
-            f"{next_day.month}/{next_day.day} 私の推し株銘柄({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
-            f"平日夜更新します〜\n" +
-            f"投資判断はご自身で\n" +
+            f"{next_day.month}/{next_day.day} 私の推し株({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
+            f"平日夜更新！\n" +
+            f"​※個人の研究記録/投資は自己責任で\n" +
             f"Survival Investor adoGEM\n" +
-            f"​#日本株 #株式投資 #サバイバル投資家 #サラリーマン投資家 #adoGEM\n" +
-            f"BGM: Created with Suno\n" +
+            f"​​#日本株 #adoGEM #サバイバル投資家 #サラリーマン投資家\n" +
+            f"BGM:Suno\n" +
             f"----------------------\n" +
             f"中文版\n" +
             f"{next_day.month}/{next_day.day} 个人关注股票( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 收盘数据)\n" +
