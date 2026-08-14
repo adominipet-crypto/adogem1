@@ -212,7 +212,7 @@ def main():
             f"​※個人の研究記録/投資は自己責任で\n" +
             f"Survival Investor adoGEM\n" +
             f"​​#日本株 #adoGEM #サバイバル投資家 #サラリーマン投資家 #明日株\n" +
-            f"BGM:Suno\n" +
+            f"BGM:gemini\n" +
             f"----------------------\n" +
             f"中文版\n" +
             f"{next_day.month}/{next_day.day} 个人关注股票( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 收盘数据)\n" +
