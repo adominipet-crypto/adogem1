@@ -98,7 +98,7 @@ def get_nikkei_evaluation_line():
         pct = ((curr_val - prev_val) / prev_val) * 100
         mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
         return f"【日経平均の判定】\n  {mark} | NIKKEI225 | {int(prev_val)}円 ({prev_date.strftime('%m-%d')}) → {int(curr_val)}円 ({curr_date.strftime('%m-%d')}) ({pct:+.2f}%)"
-    except Exception as e: return f"【日経平均の判定】\n  自動取得エラー: {e}"
+    except Exception as e: return f"【日経平均の判定】翌営業日の参考\n  自動取得エラー: {e}"
 
 def update_yesterday_results():
     global stage_results_report, stage_stats_counter
