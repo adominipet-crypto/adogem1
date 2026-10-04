@@ -214,7 +214,7 @@ def main():
             f"​​#日本株 #adoGEM #サバイバル投資家 #サラリーマン投資家 #明日株\n" +
             f"----------------------\n" +
             f"中文版\n" +
-            f"{next_day.month}/{next_day.day} 【 收盤現異象！ 】adoGEM捕捉到的( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 收盘数据)\n" +
+            f"{next_day.month}/{next_day.day} 【收盘现异象！】adoGEM提取( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 数据)\n" +
             f"50多岁上班族的adoGEM生存逻辑\n" +
             "--------------------------------------------------")
         
