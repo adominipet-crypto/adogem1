@@ -207,11 +207,10 @@ def main():
             f"★: {stats['★']} / Short: {stats['★(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
             f"{conditions_text}\n\n" +
-            f"{next_day.month}/{next_day.day} 【大引けに異変】adoGEM特定銘柄({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
+            f"{next_day.month}/{next_day.day} 【明日株速報】adoGEM銘柄({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
             f"平日夜更新！\n" +
-            f"​※個人の研究記録\n" +
             f"Survival Investor adoGEM\n" +
-            f"​​#日本株 #adoGEM #サバイバル投資家 #サラリーマン投資家 #明日株\n" +
+            f"​​#日本株 #adoGEM #サラリーマン投資家 #JapanStock #Candlestick\n" +
             f"----------------------\n" +
             f"中文版\n" +
             f"{next_day.month}/{next_day.day} 【收盘现异象！】adoGEM提取( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 数据)\n" +
