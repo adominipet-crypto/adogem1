@@ -1,4 +1,4 @@
-import warnings
+Import warnings
 warnings.simplefilter('ignore', FutureWarning)
 
 import pandas as pd
@@ -159,6 +159,43 @@ def analyze_stock(symbol):
     else: stats["normal_detect"] += 1
     return "OK"
 
+def generate_stock_codes(start_arg, end_arg):
+    """
+    数値範囲指定（数字のみ）に加え、英数字が含まれる銘柄コード（東証の4桁英数コード）も生成する関数
+    """
+    codes = []
+    
+    # 引数が数値化できる場合は従来の範囲指定 + 英数字対応コードを補完
+    if str(start_arg).isdigit() and str(end_arg).isdigit():
+        start_num, end_num = int(start_arg), int(end_arg)
+        
+        # 1. 従来の数字のみ銘柄コード
+        for i in range(start_num, end_num):
+            if not 1300 <= i <= 1600:  # ETF等を除外する条件（必要に応じて維持）
+                codes.append(str(i))
+                
+        # 2. 英数字混じり銘柄コードの生成（例: 130A〜999Zなど、該当範囲の英字付きコードを追加）
+        # 東証の新コード体系（3桁数字 + 1桁アルファベット/数字など）
+        start_prefix = start_num // 10
+        end_prefix = end_num // 10
+        chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        
+        for p in range(start_prefix, end_prefix + 1):
+            for c in chars:
+                code_candidate = f"{p}{c}"
+                # 4桁コードの英数字パターンにマッチし、かつ重複がなければ追加
+                if re.match(r'^[0-9A-Za-z]{4}$', code_candidate) and code_candidate not in codes:
+                    codes.append(code_candidate)
+    else:
+        # カンマ区切り等で直接渡された場合
+        raw_list = str(start_arg).split(",")
+        for item in raw_list:
+            item_str = item.strip()
+            if re.match(r'^[0-9A-Za-z]{4}$', item_str):
+                codes.append(item_str)
+                
+    return codes
+
 def main():
     fetch_global_latest_date()
     update_yesterday_results()
@@ -177,7 +214,11 @@ def main():
         "【判定結果マーク基準】翌日終値\n ◎ ： +2.0%以上\n ◯ ： +0.1%〜+2.0%\n ▲ ： -0.1%〜+0.1%\n ✕ ： -0.1%未満"
     )
     
-    for s in [str(i) for i in range(int(sys.argv[1]), int(sys.argv[2])) if not 1300 <= int(i) <= 1600]: analyze_stock(s)
+    # 銘柄コードリスト生成（英数字対応）
+    target_stock_codes = generate_stock_codes(sys.argv[1], sys.argv[2])
+    
+    for s in target_stock_codes: 
+        analyze_stock(s)
     
     sheet = connect_spreadsheet()
     sheet.append_rows([[r["date"], c, {"stage7": "7. 右肩上がり", "stage8": "8. 長期トレンド", "stage9": "9. 当日陽線", "completed_pass": "9. 当日陽線"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for c, r in sheet1_final_log.items() if r["stage_key"] in ["stage7", "stage8", "stage9", "completed_pass"]], value_input_option='RAW')
@@ -202,7 +243,7 @@ def main():
         judgement_lines.append("")
         
     body = (f"サバイバル投資家adoGEM\n" + 
-            f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}\n総対象: {int(sys.argv[2])-int(sys.argv[1])}件\n\n【各ステージ生存数】\n" + 
+            f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}\n総対象: {len(target_stock_codes)}件\n\n【各ステージ生存数】\n" + 
             newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "月足60", "出来高", "下半身", "MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) + "\n\n" +
             f"★: {stats['★']} / Short: {stats['★(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
@@ -211,8 +252,8 @@ def main():
             f"Survival Investor adoGEM\n" +
             f"----------------------\n" +
             f"中文版\n" +
-            f"{next_day.month}/{next_day.day}( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 数据)【adoGEM日股数据】\n" +
-            f"50多岁上班族的adoGEM生存逻辑\n" +
+            f"{next_day.month}/{next_day.day}( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} データ)【adoGEM日股データ】\n" +
+            f"50多歳サラリーマンのadoGEMサバイバルロジック\n" +
             "--------------------------------------------------")
         
     msg = MIMEMultipart()
