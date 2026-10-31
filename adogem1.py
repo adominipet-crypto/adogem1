@@ -237,7 +237,7 @@ def main():
             f"★: {stats['★']} / Short: {stats['★(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
             f"{conditions_text}\n\n" +
-            f"{next_day.month}/{next_day.day}({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)【adoGEM明日株速報】🔥平日夜更新 ​​#日本株 #adoGEM #サラリーマン投資家 #株初心者 #JapanStock \n" +
+            f"{next_day.month}/{next_day.day}({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)【adoGEM明日株速報】🔥平日夜更新 ​​#日本株 #adoGEM #日本株おすすめ #株初心者 #日本株速報 \n" +
             f"Survival Investor adoGEM\n" +
             f"----------------------\n" +
             f"中文版\n" +
