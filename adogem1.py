@@ -211,7 +211,27 @@ def main():
         analyze_stock(s)
     
     sheet = connect_spreadsheet()
-    sheet.append_rows([[r["date"], c, {"stage7": "7. 右肩上がり", "stage8": "8. 長期トレンド", "stage9": "9. 当日陽線", "completed_pass": "9. 当日陽線"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for c, r in sheet1_final_log.items() if r["stage_key"] in ["stage7", "stage8", "stage9", "completed_pass"]], value_input_option='RAW')
+    
+    # 修正：A列から確実に書き込むための処理
+    rows_to_append = [
+        [
+            r["date"], 
+            c, 
+            {"stage7": "7. 右肩上がり", "stage8": "8. 長期トレンド", "stage9": "9. 当日陽線", "completed_pass": "9. 当日陽線"}[r["stage_key"]], 
+            r["ppp_label"].strip() or "通常", 
+            r["price"], 
+            "", 
+            "判定待ち", 
+            ""
+        ] 
+        for c, r in sheet1_final_log.items() 
+        if r["stage_key"] in ["stage7", "stage8", "stage9", "completed_pass"]
+    ]
+    
+    if rows_to_append:
+        col_values = sheet.col_values(1)  # A列の値を取得して最終行を特定
+        next_row = len(col_values) + 1
+        sheet.update(f'A{next_row}', rows_to_append, value_input_option='RAW')
     
     newline = "\n"
     final_list_str = newline.join([f"  {s['ppp_label']}■ {code} | {s['price']}円 ({s['date'][5:]})" for code, s in sorted(selected_stocks.items())])
