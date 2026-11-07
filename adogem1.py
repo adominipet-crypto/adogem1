@@ -136,7 +136,7 @@ def analyze_stock(symbol):
     stage_survivors["stage1"] += 1
     if c.iloc[idx] <= ma60.iloc[idx]: return "SKIP"
     stage_survivors["stage2"] += 1
-    if v.iloc[idx] < 50000: return "SKIP"
+    if v.iloc[idx] < 70000: return "SKIP"
     stage_survivors["stage3"] += 1
     if c.iloc[idx] <= ma5.iloc[idx]: return "SKIP"
     stage_survivors["stage4"] += 1
@@ -199,7 +199,7 @@ def main():
     
     conditions_text = (
         "【条件一覧】\n"
-        "1. 全データ取得成功\n2. 月足MA60上抜け\n3. 出来高5万株以上\n4. 下半身(終値>MA5)\n"
+        "1. 全データ取得成功\n2. 月足MA60上抜け\n3. 出来高7万株以上\n4. 下半身(終値>MA5)\n"
         "5. MA20上抜け後7日以内\n6. 溜め(前日終値<MA5)\n7. 右肩上がり(MA60)\n"
         "8. 長期トレンド(MA100上昇)\n9. 当日陽線(始値<終値)\n\n"
         "【判定結果マーク基準】翌日終値\n ◎ ： +2.0%以上\n ◯ ： +0.1%〜+2.0%\n ▲ ： -0.1%〜+0.1%\n ✕ ： -0.1%未満"
