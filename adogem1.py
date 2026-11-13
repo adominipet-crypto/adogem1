@@ -107,21 +107,47 @@ def update_yesterday_results():
         all_records = sheet.get_all_values()
         cell_list = []
         target_match_date = get_previous_trading_day(GLOBAL_LATEST_DATE) if GLOBAL_LATEST_DATE else None
+        
         for i, row in enumerate(all_records):
-            if i == 0 or len(row) < 8 or row[6] != "判定待ち": continue
-            code, sel_date = row[1], datetime.datetime.strptime(row[0], "%Y-%m-%d").date()
+            # ヘッダー行をスキップ。また、A列（index 0）が空または短すぎる行は誤作動防止のためスキップ
+            if i == 0 or len(row) < 7 or not row[0].strip(): continue
+            if row[6] != "判定待ち": continue
+            
+            code, sel_date_str = row[1], row[0].strip()
+            try:
+                sel_date = datetime.datetime.strptime(sel_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                continue # 日付フォーマットがおかしい行はスキップ
+                
             if target_match_date and sel_date != target_match_date: continue
+            
             next_data = get_next_trading_day_data(code, sel_date)
             if next_data is not None:
                 next_close, selected_price = int(next_data['Close']), int(row[4])
                 pct = ((next_close - selected_price) / selected_price) * 100
                 mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
-                cell_list.extend([gspread.Cell(i+1, 6, next_close), gspread.Cell(i+1, 7, mark), gspread.Cell(i+1, 8, f"{pct:+.2f}%")])
-                s_key = {"6. 溜め": "stage6", "7. 右肩上がり": "stage7", "8. 長期トレンド": "stage8", "9. 当日陽線": "stage9"}.get(row[2], "completed_pass")
+                
+                # 正しくA列基準のインデックス（F列=6, G列=7, H列=8）を指定
+                cell_list.extend([
+                    gspread.Cell(i+1, 6, next_close), 
+                    gspread.Cell(i+1, 7, mark), 
+                    gspread.Cell(i+1, 8, f"{pct:+.2f}%")
+                ])
+                
+                s_key = {
+                    "6. 溜め": "stage6", 
+                    "7. 右肩上がり": "stage7", 
+                    "8. 長期トレンド": "stage8", 
+                    "9. 当日陽線": "stage9",
+                    "完全合格": "completed_pass"
+                }.get(row[2], "completed_pass")
+                
                 ppp_prefix = f"{row[3].strip()} " if row[3].strip() in ["★", "★(Short)"] else ""
                 stage_results_report[s_key].append(f"  {ppp_prefix}{mark} ■ {code} | {selected_price}円 ({row[0][5:]}) → {next_close}円 ({pct:+.2f}%)")
-                stage_match = {"6. 溜め": 6, "7. 右肩上がり": 7, "8. 長期トレンド": 8, "9. 当日陽線": 9}.get(row[2])
+                
+                stage_match = {"6. 溜め": 6, "7. 右肩上がり": 7, "8. 長期トレンド": 8, "9. 当日陽線": 9, "完全合格": 9}.get(row[2])
                 if stage_match: stage_stats_counter[stage_match][mark] += 1
+                
         if cell_list: sheet.update_cells(cell_list)
     except Exception as e: print(f"判定エラー: {e}")
 
@@ -143,7 +169,6 @@ def analyze_stock(symbol):
     if not any(c.iloc[i] > ma20.iloc[i] and c.iloc[i-1] <= ma20.iloc[i-1] for i in range(idx - 6, idx + 1) if i >= 1): return "SKIP"
     stage_survivors["stage5"] += 1
     
-    # ★ 判定用の文字列設定を統一
     ppp = "★ " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0)) else ("★(Short) " if (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx]) else "")
     date_str = df.index[idx].strftime("%Y-%m-%d")
     
@@ -166,24 +191,36 @@ def main():
     next_day = GLOBAL_LATEST_DATE + datetime.timedelta(days=1)
     while next_day.weekday() >= 5: next_day += datetime.timedelta(days=1)
         
-    date_str_formatted = next_day.strftime("%y年%m月%d日")
-    date_str_en = next_day.strftime("%B %d, %y")
-    
-    conditions_text = (
-        "【条件一覧】\n"
-        "1. 全データ取得成功\n2. 月足MA60上抜け\n3. 出来高6万株以上\n4. 下半身(終値>MA5)\n"
-        "5. MA20上抜け後7日以内\n6. 溜め(前日終値<MA5)\n7. 右肩上がり(MA60)\n"
-        "8. 長期トレンド(MA100上昇)\n9. 当日陽線(始値<終値)\n\n"
-        "【判定結果マーク基準】翌日終値\n ◎ ： +2.0%以上\n ◯ ： +0.1%〜+2.0%\n ▲ ： -0.1%〜+0.1%\n ✕ ： -0.1%未満"
-    )
-    
     for s in [str(i) for i in range(int(sys.argv[1]), int(sys.argv[2])) if not 1300 <= int(i) <= 1600]: analyze_stock(s)
     
     sheet = connect_spreadsheet()
-    sheet.append_rows([[r["date"], c, {"stage7": "7. 右肩上がり", "stage8": "8. 長期トレンド", "stage9": "9. 当日陽線", "completed_pass": "9. 当日陽線"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for c, r in sheet1_final_log.items() if r["stage_key"] in ["stage7", "stage8", "stage9", "completed_pass"]], value_input_option='RAW')
+    
+    # 修正：完全合格を「完全合格」という文字列で正しく書き込む
+    stage_name_map = {
+        "stage7": "7. 右肩上がり", 
+        "stage8": "8. 長期トレンド", 
+        "stage9": "9. 当日陽線", 
+        "completed_pass": "完全合格"
+    }
+    
+    rows_to_append = []
+    for c, r in sheet1_final_log.items():
+        if r["stage_key"] in stage_name_map:
+            rows_to_append.append([
+                r["date"], 
+                c, 
+                stage_name_map[r["stage_key"]], 
+                r["ppp_label"].strip() or "通常", 
+                r["price"], 
+                "", 
+                "判定待ち", 
+                ""
+            ])
+            
+    if rows_to_append:
+        sheet.append_rows(rows_to_append, value_input_option='RAW')
     
     newline = "\n"
-    # 完全合格一覧の出力条件を s['ppp_label'] をそのまま付与する形に修正
     final_list_str = newline.join([f"  {s['ppp_label']}■ {code} | {s['price']}円 ({s['date'][5:]})" for code, s in sorted(selected_stocks.items())])
     
     ratio_lines = ["【6〜9の判定結果】"]
@@ -206,7 +243,11 @@ def main():
             newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "月足60", "出来高", "下半身", "MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) + "\n\n" +
             f"★: {stats['★']} / Short: {stats['★(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
-            f"{conditions_text}\n\n" +
+            f"【条件一覧】\n" +
+            "1. 全データ取得成功\n2. 月足MA60上抜け\n3. 出来高6万株以上\n4. 下半身(終値>MA5)\n" +
+            "5. MA20上抜け後7日以内\n6. 溜め(前日終値<MA5)\n7. 右肩上がり(MA60)\n" +
+            "8. 長期トレンド(MA100上昇)\n9. 当日陽線(始値<終値)\n\n" +
+            "【判定結果マーク基準】翌日終値\n ◎ ： +2.0%以上\n ◯ ： +0.1%〜+2.0%\n ▲ ： -0.1%〜+0.1%\n ✕ ： -0.1%未満\n\n" +
             f"{next_day.month}/{next_day.day} 私の推し株({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
             f"平日夜更新！\n" +
             f"​※個人の研究記録/投資は自己責任で\n" +
@@ -217,7 +258,7 @@ def main():
             f"中文版\n" +
             f"{next_day.month}/{next_day.day} ( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 数据) 【adoGEM日股数据】\n" +
             f"50多岁上班族的adoGEM生存逻辑\n" +
-            "--------------------------------------------------")
+            f"--------------------------------------------------")
         
     msg = MIMEMultipart()
     msg['From'], msg['To'], msg['Subject'] = SENDER_EMAIL, SENDER_EMAIL, f"📊 adoGEM レポート"
