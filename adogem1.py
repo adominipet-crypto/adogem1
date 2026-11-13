@@ -109,7 +109,6 @@ def update_yesterday_results():
         target_match_date = get_previous_trading_day(GLOBAL_LATEST_DATE) if GLOBAL_LATEST_DATE else None
         
         for i, row in enumerate(all_records):
-            # ヘッダー行をスキップ。また、A列（index 0）が空または短すぎる行は誤作動防止のためスキップ
             if i == 0 or len(row) < 7 or not row[0].strip(): continue
             if row[6] != "判定待ち": continue
             
@@ -117,7 +116,7 @@ def update_yesterday_results():
             try:
                 sel_date = datetime.datetime.strptime(sel_date_str, "%Y-%m-%d").date()
             except ValueError:
-                continue # 日付フォーマットがおかしい行はスキップ
+                continue
                 
             if target_match_date and sel_date != target_match_date: continue
             
@@ -127,7 +126,6 @@ def update_yesterday_results():
                 pct = ((next_close - selected_price) / selected_price) * 100
                 mark = "◎" if pct >= 2.0 else "◯" if pct >= 0.1 else "▲" if pct > -0.1 else "✕"
                 
-                # 正しくA列基準のインデックス（F列=6, G列=7, H列=8）を指定
                 cell_list.extend([
                     gspread.Cell(i+1, 6, next_close), 
                     gspread.Cell(i+1, 7, mark), 
@@ -195,7 +193,6 @@ def main():
     
     sheet = connect_spreadsheet()
     
-    # 修正：完全合格を「完全合格」という文字列で正しく書き込む
     stage_name_map = {
         "stage7": "7. 右肩上がり", 
         "stage8": "8. 長期トレンド", 
@@ -238,17 +235,21 @@ def main():
         judgement_lines.extend(stage_results_report.get(key) or ["  該当なし"])
         judgement_lines.append("")
         
+    conditions_text = (
+        "【条件一覧】\n"
+        "1. 全データ取得成功\n2. 日足MA60上抜け\n3. 出来高6万株以上\n4. 下半身(終値>MA5)\n"
+        "5. MA20上抜け後7日以内\n6. 溜め(前日終値<MA5)\n7. 右肩上がり(MA60)\n"
+        "8. 長期トレンド(MA100上昇)\n9. 当日陽線(始値<終値)\n\n"
+        "【判定結果マーク基準】翌日終値\n ◎ ： +2.0%以上\n ◯ ： +0.1%〜+2.0%\n ▲ ： -0.1%〜+0.1%\n ✕ ： -0.1%未満"
+    )
+
     body = (f"サバイバル投資家adoGEM\n" + 
             f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}\n総対象: {int(sys.argv[2])-int(sys.argv[1])}件\n\n【各ステージ生存数】\n" + 
-            newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "月足60", "出来高", "下半身", "MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) + "\n\n" +
+            newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "日足60", "出来高", "下半身", "日足MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) + "\n\n" +
             f"★: {stats['★']} / Short: {stats['★(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
-            f"【条件一覧】\n" +
-            "1. 全データ取得成功\n2. 月足MA60上抜け\n3. 出来高6万株以上\n4. 下半身(終値>MA5)\n" +
-            "5. MA20上抜け後7日以内\n6. 溜め(前日終値<MA5)\n7. 右肩上がり(MA60)\n" +
-            "8. 長期トレンド(MA100上昇)\n9. 当日陽線(始値<終値)\n\n" +
-            "【判定結果マーク基準】翌日終値\n ◎ ： +2.0%以上\n ◯ ： +0.1%〜+2.0%\n ▲ ： -0.1%〜+0.1%\n ✕ ： -0.1%未満\n\n" +
-            f"{next_day.month}/{next_day.day} 私の推し株({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
+            f"{conditions_text}\n\n" +
+            f"{next_day.month}/{next_day.day} 私の推し株({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n" +
             f"平日夜更新！\n" +
             f"​※個人の研究記録/投資は自己責任で\n" +
             f"Survival Investor adoGEM\n" +
