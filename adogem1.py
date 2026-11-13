@@ -136,7 +136,7 @@ def analyze_stock(symbol):
     stage_survivors["stage1"] += 1
     if c.iloc[idx] <= ma60.iloc[idx]: return "SKIP"
     stage_survivors["stage2"] += 1
-    if v.iloc[idx] < 70000: return "SKIP"
+    if v.iloc[idx] < 60000: return "SKIP"
     stage_survivors["stage3"] += 1
     if c.iloc[idx] <= ma5.iloc[idx]: return "SKIP"
     stage_survivors["stage4"] += 1
@@ -159,34 +159,6 @@ def analyze_stock(symbol):
     else: stats["normal_detect"] += 1
     return "OK"
 
-def generate_stock_codes(start_arg, end_arg):
-    codes = []
-    
-    if str(start_arg).isdigit() and str(end_arg).isdigit():
-        start_num, end_num = int(start_arg), int(end_arg)
-        
-        for i in range(start_num, end_num):
-            if not 1300 <= i <= 1600:
-                codes.append(str(i))
-                
-        start_prefix = start_num // 10
-        end_prefix = end_num // 10
-        chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        
-        for p in range(start_prefix, end_prefix + 1):
-            for c in chars:
-                code_candidate = f"{p}{c}"
-                if re.match(r'^[0-9A-Za-z]{4}$', code_candidate) and code_candidate not in codes:
-                    codes.append(code_candidate)
-    else:
-        raw_list = str(start_arg).split(",")
-        for item in raw_list:
-            item_str = item.strip()
-            if re.match(r'^[0-9A-Za-z]{4}$', item_str):
-                codes.append(item_str)
-                
-    return codes
-
 def main():
     fetch_global_latest_date()
     update_yesterday_results()
@@ -199,41 +171,19 @@ def main():
     
     conditions_text = (
         "【条件一覧】\n"
-        "1. 全データ取得成功\n2. 月足MA60上抜け\n3. 出来高7万株以上\n4. 下半身(終値>MA5)\n"
+        "1. 全データ取得成功\n2. 月足MA60上抜け\n3. 出来高6万株以上\n4. 下半身(終値>MA5)\n"
         "5. MA20上抜け後7日以内\n6. 溜め(前日終値<MA5)\n7. 右肩上がり(MA60)\n"
         "8. 長期トレンド(MA100上昇)\n9. 当日陽線(始値<終値)\n\n"
         "【判定結果マーク基準】翌日終値\n ◎ ： +2.0%以上\n ◯ ： +0.1%〜+2.0%\n ▲ ： -0.1%〜+0.1%\n ✕ ： -0.1%未満"
     )
     
-    target_stock_codes = generate_stock_codes(sys.argv[1], sys.argv[2])
-    
-    for s in target_stock_codes: 
-        analyze_stock(s)
+    for s in [str(i) for i in range(int(sys.argv[1]), int(sys.argv[2])) if not 1300 <= int(i) <= 1600]: analyze_stock(s)
     
     sheet = connect_spreadsheet()
-    
-    # 修正：A列から確実に書き込むための処理
-    rows_to_append = [
-        [
-            r["date"], 
-            c, 
-            {"stage7": "7. 右肩上がり", "stage8": "8. 長期トレンド", "stage9": "9. 当日陽線", "completed_pass": "9. 当日陽線"}[r["stage_key"]], 
-            r["ppp_label"].strip() or "通常", 
-            r["price"], 
-            "", 
-            "判定待ち", 
-            ""
-        ] 
-        for c, r in sheet1_final_log.items() 
-        if r["stage_key"] in ["stage7", "stage8", "stage9", "completed_pass"]
-    ]
-    
-    if rows_to_append:
-        col_values = sheet.col_values(1)  # A列の値を取得して最終行を特定
-        next_row = len(col_values) + 1
-        sheet.update(f'A{next_row}', rows_to_append, value_input_option='RAW')
+    sheet.append_rows([[r["date"], c, {"stage7": "7. 右肩上がり", "stage8": "8. 長期トレンド", "stage9": "9. 当日陽線", "completed_pass": "9. 当日陽線"}[r["stage_key"]], r["ppp_label"].strip() or "通常", r["price"], "", "判定待ち", ""] for c, r in sheet1_final_log.items() if r["stage_key"] in ["stage7", "stage8", "stage9", "completed_pass"]], value_input_option='RAW')
     
     newline = "\n"
+    # 完全合格一覧の出力条件を s['ppp_label'] をそのまま付与する形に修正
     final_list_str = newline.join([f"  {s['ppp_label']}■ {code} | {s['price']}円 ({s['date'][5:]})" for code, s in sorted(selected_stocks.items())])
     
     ratio_lines = ["【6〜9の判定結果】"]
@@ -252,16 +202,20 @@ def main():
         judgement_lines.append("")
         
     body = (f"サバイバル投資家adoGEM\n" + 
-            f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}\n総対象: {len(target_stock_codes)}件\n\n【各ステージ生存数】\n" + 
+            f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}\n総対象: {int(sys.argv[2])-int(sys.argv[1])}件\n\n【各ステージ生存数】\n" + 
             newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "月足60", "出来高", "下半身", "MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) + "\n\n" +
             f"★: {stats['★']} / Short: {stats['★(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
             f"{conditions_text}\n\n" +
-            f"{next_day.month}/{next_day.day}({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)【adoGEM明日株速報】🔥平日夜更新 ​​#日本株 #adoGEM #日本株おすすめ #株初心者 #日本株速報 \n" +
+            f"{next_day.month}/{next_day.day} 私の推し株({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n\n" +
+            f"平日夜更新！\n" +
+            f"​※個人の研究記録/投資は自己責任で\n" +
             f"Survival Investor adoGEM\n" +
+            f"​​#日本株 #adoGEM #日本株おすすめ #株初心者 #日本株速報\n" +
+            f"BGM:gemini\n" +
             f"----------------------\n" +
             f"中文版\n" +
-            f"{next_day.month}/{next_day.day}( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 数据)【adoGEM日股数据】\n" +
+            f"{next_day.month}/{next_day.day} ( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 数据) 【adoGEM日股数据】\n" +
             f"50多岁上班族的adoGEM生存逻辑\n" +
             "--------------------------------------------------")
         
