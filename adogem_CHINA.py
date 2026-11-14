@@ -18,7 +18,6 @@ selected_stocks = {}
 GLOBAL_LATEST_DATE = None
 
 # --- スキャン対象：中国本土（上海.SS / 深セン.SZ）・香港（.HK）主要銘柄リスト ---
-# ※必要に応じて銘柄コードを自由に追加・編集できます
 CHINA_TARGET_SYMBOLS = [
     # 香港主要銘柄 (.HK) - 4桁ゼロ埋め形式
     "0700.HK", "9988.HK", "3690.HK", "1810.HK", "9618.HK", "9999.HK", "1211.HK", "2318.HK",
@@ -41,7 +40,6 @@ CHINA_TARGET_SYMBOLS = [
 def fetch_global_latest_date():
     global GLOBAL_LATEST_DATE
     try:
-        # ハンセン指数 (^HSI) で最新営業日を取得
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/^HSI?range=1mo&interval=1d&nocache={int(time.time())}"
         headers = {"User-Agent": "Mozilla/5.0"}
         res = requests.get(url, headers=headers, timeout=15)
@@ -58,7 +56,6 @@ def get_stock_data_fallback(symbol, force_check_date=True):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5y&interval=1d&nocache={int(time.time())}"
     
-    # レート制限対策：最大2回リトライ
     for attempt in range(2):
         try:
             res = requests.get(url, headers=headers, timeout=15)
@@ -126,26 +123,20 @@ def analyze_stock(symbol):
     ma100 = c.rolling(100).mean()
     ma300 = c.rolling(300).mean()
     
-    # 1. データ取得成功
     stage_survivors["stage1"] += 1
-    # 2. 日足MA60上抜け
     if c.iloc[idx] <= ma60.iloc[idx]:
         return "SKIP"
     stage_survivors["stage2"] += 1
-    # 3. 出来高6万株以上
     if v.iloc[idx] < 60000:
         return "SKIP"
     stage_survivors["stage3"] += 1
-    # 4. 下半身(終値 > MA5)
     if c.iloc[idx] <= ma5.iloc[idx]:
         return "SKIP"
     stage_survivors["stage4"] += 1
-    # 5. MA20上抜け後7日以内
     if not any(c.iloc[i] > ma20.iloc[i] and c.iloc[i-1] <= ma20.iloc[i-1] for i in range(idx - 6, idx + 1) if i >= 1):
         return "SKIP"
     stage_survivors["stage5"] += 1
     
-    # PPP判定
     is_full_ppp = (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0))
     is_short_ppp = (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx])
     ppp = "★ " if is_full_ppp else ("★(Short) " if is_short_ppp else "")
@@ -153,12 +144,11 @@ def analyze_stock(symbol):
     date_str = df.index[idx].strftime("%Y-%m-%d")
     currency = "HKD" if symbol.endswith(".HK") else "CNY"
     
-    # 6〜9の最終フィルタ判定
     conditions = [
-        (c.iloc[prev_idx] < ma5.iloc[prev_idx], "stage6"),  # 6. 溜め
-        (ma60.iloc[idx] > ma60.iloc[prev_idx], "stage7"),  # 7. 右肩上がり
-        (ma100.iloc[idx] > ma100.iloc[prev_idx], "stage8"), # 8. 長期トレンド
-        (o.iloc[idx] < c.iloc[idx], "stage9")              # 9. 当日陽線
+        (c.iloc[prev_idx] < ma5.iloc[prev_idx], "stage6"),
+        (ma60.iloc[idx] > ma60.iloc[prev_idx], "stage7"),
+        (ma100.iloc[idx] > ma100.iloc[prev_idx], "stage8"),
+        (o.iloc[idx] < c.iloc[idx], "stage9")
     ]
     
     for cond, stage in conditions:
@@ -191,7 +181,7 @@ def main():
         
     for symbol in CHINA_TARGET_SYMBOLS:
         analyze_stock(symbol)
-        time.sleep(0.15)  # APIレート制限回避のためのウェイト
+        time.sleep(0.3)  # APIレート制限回避のためのウェイトを強化
         
     newline = "\n"
     final_list_str = newline.join([
