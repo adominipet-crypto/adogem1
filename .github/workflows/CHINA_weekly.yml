@@ -1,4 +1,4 @@
-name: adoGEM China Weekly Scan
+name: adoGEM CHINA Weekly Scan
 
 on:
   schedule:
@@ -28,4 +28,4 @@ jobs:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: |
-          python adogem_china.py
+          python adogem_CHINA.py
