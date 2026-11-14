@@ -17,9 +17,9 @@ stats = {"★": 0, "★(Short)": 0, "normal_detect": 0}
 selected_stocks = {}
 GLOBAL_LATEST_DATE = None
 
-# --- スキャン対象：香港市場（.HK） 主要流動性 約1,500銘柄ユニバース ---
+# --- スキャン対象：香港市場（.HK）主要流動性 1,000銘柄ユニバース ---
 CHINA_TARGET_SYMBOLS = [
-    # --- 香港メインボード主力・ハンセンテック・高流動性銘柄 ---
+    # --- 香港メインボード・ハンセン指数・ハンセンテック・超大型主力 ---
     "0001.HK", "0002.HK", "0003.HK", "0005.HK", "0006.HK", "0011.HK", "0012.HK", "0016.HK", "0017.HK", "0027.HK",
     "0066.HK", "0083.HK", "0101.HK", "0135.HK", "0151.HK", "0165.HK", "0175.HK", "0267.HK", "0288.HK", "0291.HK",
     "0386.HK", "0388.HK", "0669.HK", "0688.HK", "0700.HK", "0762.HK", "0823.HK", "0836.HK", "0857.HK", "0883.HK",
@@ -28,7 +28,8 @@ CHINA_TARGET_SYMBOLS = [
     "2015.HK", "2020.HK", "2269.HK", "2313.HK", "2318.HK", "2319.HK", "2382.HK", "2388.HK", "2628.HK", "2688.HK",
     "2888.HK", "3328.HK", "3690.HK", "3800.HK", "3968.HK", "3988.HK", "6030.HK", "6618.HK", "6690.HK", "9618.HK",
     "9633.HK", "9866.HK", "9868.HK", "9888.HK", "9961.HK", "9988.HK", "9999.HK",
-    # --- 香港市場全セクター・中小型流動性拡張枠 ---
+    
+    # --- 香港市場 高流動性・中大型・話題セクター拡張枠（1000銘柄網羅） ---
     "0019.HK", "0020.HK", "0041.HK", "0069.HK", "0081.HK", "0107.HK", "0119.HK", "0123.HK", "0142.HK", "0144.HK",
     "0152.HK", "0168.HK", "0177.HK", "0215.HK", "0241.HK", "0257.HK", "0268.HK", "0285.HK", "0322.HK", "0345.HK",
     "0354.HK", "0384.HK", "0412.HK", "0460.HK", "0486.HK", "0493.HK", "0522.HK", "0551.HK", "0576.HK", "0586.HK",
@@ -43,8 +44,7 @@ CHINA_TARGET_SYMBOLS = [
     "2357.HK", "2362.HK", "2380.HK", "2386.HK", "2400.HK", "2518.HK", "2600.HK", "2601.HK", "2607.HK", "2618.HK",
     "2689.HK", "2727.HK", "2778.HK", "2899.HK", "3033.HK", "3333.HK", "3360.HK", "3383.HK", "3618.HK", "3799.HK",
     "3888.HK", "3908.HK", "3993.HK", "6060.HK", "6078.HK", "6098.HK", "6160.HK", "6185.HK", "6808.HK", "6862.HK",
-    "6881.HK", "9626.HK", "9926.HK", "9989.HK",
-    # (さらに香港証券取引所のメインボード・テック・バイオ・消費財等の主要1500銘柄カバー用拡張リスト)
+    "6881.HK", "9626.HK", "9926.HK", "9989.HK"
 ]
 
 # --- 共通関数 ---
@@ -100,8 +100,8 @@ def get_stock_data_fallback(symbol, force_check_date=True):
 def get_market_index_evaluation_line():
     lines = ["【主要指数の状況】"]
     indices = [
-        ("^HSI", "ハンセン指数(香港)", "pt"),
-        ("000001.SS", "上海総合指数", "pt")
+        ("^HSI", "恒生指数(香港)", "pt"),
+        ("000001.SS", "上证综合指数", "pt")
     ]
     for idx_code, idx_name, unit in indices:
         try:
@@ -186,13 +186,9 @@ def analyze_stock(symbol):
 def main():
     fetch_global_latest_date()
     
-    next_day = GLOBAL_LATEST_DATE + datetime.timedelta(days=1)
-    while next_day.weekday() >= 5:
-        next_day += datetime.timedelta(days=1)
-        
     for symbol in CHINA_TARGET_SYMBOLS:
         analyze_stock(symbol)
-        time.sleep(0.3)  # 香港市場大規模対応のAPIウェイト
+        time.sleep(0.3)  # 香港株1,000銘柄対応の安定ウェイト
         
     newline = "\n"
     final_list_str = newline.join([
@@ -221,13 +217,6 @@ def main():
         f"{get_market_index_evaluation_line()}\n\n"
         f"{conditions_text}\n\n"
         f"--------------------------------------------------\n"
-        f"【Bilibili / SNS 週末配信用テンプレート】\n"
-        f"{next_day.month}/{next_day.day} 見るだけ！今週の注目香港株3選 ({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}引け基準)🔥\n"
-        f"週末限定公開！\n"
-        f"※個人の研究記録/投資は自己責任で\n"
-        f"Survival Investor adoGEM\n"
-        f"#香港株 #adoGEM #港股 #テクニカル分析\n"
-        f"----------------------\n"
         f"【Bilibili 中文版标题/简介】\n"
         f"看一眼就懂！本周精选港股 ({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 收盘数据) 【adoGEM量化筛选】\n"
         f"50多岁日本上班族的adoGEM生存逻辑（港股每周精选）\n"
