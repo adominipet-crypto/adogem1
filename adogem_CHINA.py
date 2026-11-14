@@ -12,26 +12,32 @@ SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
 # --- グローバル変数 ---
-stage_survivors = {f"stage{i}": 0 for i in range(1, 10)}
+stage_survivors = {f"stage{i}": 0 for i in range(1, 11)}
 stats = {"★": 0, "★(Short)": 0, "normal_detect": 0}
 selected_stocks = {}
 GLOBAL_LATEST_DATE = None
+MIN_PRICE = 1.0  # 低位ペニー株排除のための最低株価閾値 (1.0 HKD未満をスキップ)
 
-# --- スキャン対象：香港市場（.HK）主要1,000銘柄完全網羅ユニバース ---
+# --- スキャン対象：香港メインボード全域（超大型・主力・中小型を網羅するフルユニバース） ---
 CHINA_TARGET_SYMBOLS = []
-# 1. 0001.HK 〜 0999.HK のメインボード主要銘柄（約1,000銘柄を網羅）
-for i in range(1, 1000):
+
+# 1. 0001.HK から 3999.HK までの主要メインボード番号帯を網羅
+# （実在する連続・主要コードをカバー）
+for i in range(1, 4000):
     CHINA_TARGET_SYMBOLS.append(f"{i:04d}.HK")
 
-# 2. BilibiliやSNSで話題の9000番台など主要テック・新興・バイオ銘柄の追加
-extra_hk_symbols = [
-    "1810.HK", "2015.HK", "2020.HK", "2269.HK", "2318.HK", "2382.HK", 
-    "3690.HK", "6618.HK", "6690.HK", "9618.HK", "9633.HK", "9866.HK", 
-    "9868.HK", "9888.HK", "9961.HK", "9988.HK", "9999.HK"
+# 2. 6000番台・8000番台・9000番台の主要テック、新興、高配当、大型銘柄
+extra_hk_ranges = [
+    range(6000, 6100),  # 主要な香港上場ETFや大型・準大手
+    range(6800, 6900),
+    range(9600, 10000)  # 代表的なハイテク・新興企業（テンセント系、アリババ系、美団など）
 ]
-for sym in extra_hk_symbols:
-    if sym not in CHINA_TARGET_SYMBOLS:
-        CHINA_TARGET_SYMBOLS.append(sym)
+
+for r in extra_hk_ranges:
+    for i in r:
+        sym = f"{i:04d}.HK"
+        if sym not in CHINA_TARGET_SYMBOLS:
+            CHINA_TARGET_SYMBOLS.append(sym)
 
 # --- 共通関数 ---
 def fetch_global_latest_date():
@@ -114,25 +120,35 @@ def analyze_stock(symbol):
     if idx < 100:
         return "SKIP"
     c, o, v = df['Close'], df['Open'], df['Volume']
+    
+    stage_survivors["stage1"] += 1
+    
+    # 最低株価フィルター（低位ペニー株の除外）
+    if c.iloc[idx] < MIN_PRICE:
+        return "SKIP"
+    stage_survivors["stage2"] += 1
+    
     ma5 = c.rolling(5).mean()
     ma20 = c.rolling(20).mean()
     ma60 = c.rolling(60).mean()
     ma100 = c.rolling(100).mean()
     ma300 = c.rolling(300).mean()
     
-    stage_survivors["stage1"] += 1
     if c.iloc[idx] <= ma60.iloc[idx]:
         return "SKIP"
-    stage_survivors["stage2"] += 1
+    stage_survivors["stage3"] += 1
+    
     if v.iloc[idx] < 60000:
         return "SKIP"
-    stage_survivors["stage3"] += 1
+    stage_survivors["stage4"] += 1
+    
     if c.iloc[idx] <= ma5.iloc[idx]:
         return "SKIP"
-    stage_survivors["stage4"] += 1
+    stage_survivors["stage5"] += 1
+    
     if not any(c.iloc[i] > ma20.iloc[i] and c.iloc[i-1] <= ma20.iloc[i-1] for i in range(idx - 6, idx + 1) if i >= 1):
         return "SKIP"
-    stage_survivors["stage5"] += 1
+    stage_survivors["stage6"] += 1
     
     is_full_ppp = (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx] > (ma300.iloc[idx] if pd.notna(ma300.iloc[idx]) else 0))
     is_short_ppp = (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx])
@@ -142,10 +158,10 @@ def analyze_stock(symbol):
     currency = "HKD" if symbol.endswith(".HK") else "CNY"
     
     conditions = [
-        (c.iloc[prev_idx] < ma5.iloc[prev_idx], "stage6"),
-        (ma60.iloc[idx] > ma60.iloc[prev_idx], "stage7"),
-        (ma100.iloc[idx] > ma100.iloc[prev_idx], "stage8"),
-        (o.iloc[idx] < c.iloc[idx], "stage9")
+        (c.iloc[prev_idx] < ma5.iloc[prev_idx], "stage7"),
+        (ma60.iloc[idx] > ma60.iloc[prev_idx], "stage8"),
+        (ma100.iloc[idx] > ma100.iloc[prev_idx], "stage9"),
+        (o.iloc[idx] < c.iloc[idx], "stage10")
     ]
     
     for cond, stage in conditions:
@@ -174,7 +190,7 @@ def main():
     
     for symbol in CHINA_TARGET_SYMBOLS:
         analyze_stock(symbol)
-        time.sleep(0.3)  # 1,000銘柄規模に対応する安定ウェイト
+        time.sleep(0.3)  # フルメインボード規模に対応する安定ウェイト
         
     newline = "\n"
     final_list_str = newline.join([
@@ -184,9 +200,9 @@ def main():
     
     conditions_text = (
         "【条件一覧（adoGEM共通ロジック）】\n"
-        "1. 全データ取得成功\n2. 日足MA60上抜け\n3. 出来高6万株以上\n4. 下半身(終値>MA5)\n"
-        "5. MA20上抜け後7日以内\n6. 溜め(前日終値<MA5)\n7. 右肩上がり(MA60)\n"
-        "8. 長期トレンド(MA100上昇)\n9. 当日陽線(始値<終値)"
+        "1. 全データ取得成功\n2. 最低株価フィルタ(>=1.0 HKD)\n3. 日足MA60上抜け\n4. 出来高6万株以上\n5. 下半身(終値>MA5)\n"
+        "6. MA20上抜け後7日以内\n7. 溜め(前日終値<MA5)\n8. 右肩上がり(MA60)\n"
+        "9. 長期トレンド(MA100上昇)\n10. 当日陽線(始値<終値)"
     )
 
     body = (
@@ -196,7 +212,7 @@ def main():
         f"【各ステージ生存数】\n" +
         newline.join([
             f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}"
-            for i, label in enumerate(["取得", "日足60", "出来高", "下半身", "日足MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])
+            for i, label in enumerate(["取得", "株価>=1.0", "日足60", "出来高", "下半身", "日足MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])
         ]) + "\n\n"
         f"★: {stats['★']} / Short: {stats['★(Short)']} / 通常: {stats['normal_detect']}\n\n"
         f"【完全合格一覧（週末配信候補）】\n{final_list_str or '  該当なし'}\n\n"
