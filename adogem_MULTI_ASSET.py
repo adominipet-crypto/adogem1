@@ -183,7 +183,6 @@ def evaluate_series(item):
             "category": category,
             "group": group,
             "status": "ERROR",
-            "label": f"  ？ | {name} ({symbol}) [moomoo: {moomoo_key}] | データ取得不可/不足",
             "passed": False,
             "ppp": "",
         }
@@ -235,12 +234,11 @@ def evaluate_series(item):
         pd.notna(ma60.iloc[idx]) and pd.notna(ma100.iloc[idx]) and
         (ma5.iloc[idx] > ma20.iloc[idx] > ma60.iloc[idx] > ma100.iloc[idx])
     )
-    ppp = "★ " if is_full_ppp else ("★(Short) " if is_short_ppp else "")
+    ppp = "★" if is_full_ppp else ("★(Short)" if is_short_ppp else "")
 
-    mark = "合格" if passed else "----"
     price_str = format_price(curr_val, category)
-    line = (
-        f"  [{mark}] {ppp}{name} ({symbol}) [moomoo: {moomoo_key}] | "
+    ppp_line = (
+        f"  {ppp} {name} ({symbol}) [moomoo: {moomoo_key}] | "
         f"{price_str} ({pct:+.2f}%) [{date_str[5:]}]"
     )
 
@@ -251,9 +249,11 @@ def evaluate_series(item):
         "category": category,
         "group": group,
         "status": "OK",
-        "label": line,
+        "ppp_line": ppp_line,
         "passed": passed,
         "ppp": ppp,
+        "pct": pct,
+        "price_str": price_str,
         "date": date_str,
     }
 
@@ -287,6 +287,7 @@ def main():
         time.sleep(REQUEST_SLEEP_SEC)
 
     passed_items = [r for r in results if r.get("passed")]
+    ppp_items = [r for r in results if r.get("ppp")]
     latest_dates = [r["date"] for r in results if r.get("date")]
     latest_date_str = max(latest_dates) if latest_dates else str(datetime.date.today())
 
@@ -298,19 +299,21 @@ def main():
 
     passed_str = (
         "\n".join([
-            f"  {r['ppp']}[合格] {r['name']} ({r['symbol']}) [moomoo: {r['moomoo']}] [{r['date'][5:]}]"
+            f"  {r['ppp'] + ' ' if r['ppp'] else ''}[合格] {r['name']} ({r['symbol']}) [moomoo: {r['moomoo']}] | "
+            f"{r['price_str']} ({r['pct']:+.2f}%) [{r['date'][5:]}]"
             for r in passed_items
         ])
         or "  該当なし"
     )
 
-    grouped_sections = []
+    ppp_grouped_sections = []
     for grp in GROUP_ORDER:
-        grp_lines = [r["label"] for r in results if r.get("group") == grp]
+        grp_lines = [r["ppp_line"] for r in ppp_items if r.get("group") == grp]
         if grp_lines:
-            grouped_sections.append(
-                f"=== {grp}（{len(grp_lines)}件） ===\n" + "\n".join(grp_lines)
+            ppp_grouped_sections.append(
+                f"  [{grp}（{len(grp_lines)}件）]\n" + "\n".join(grp_lines)
             )
+    ppp_str = "\n\n".join(ppp_grouped_sections) if ppp_grouped_sections else "  該当なし"
 
     body = (
         f"【YouTube貼り付け用 英文表題】\n"
@@ -320,18 +323,18 @@ def main():
         f"最新日足基準日: {latest_date_str}\n"
         f"対象内訳: 全{len(WIDE_MARKET_WATCHLIST)}銘柄 "
         f"（指数: {index_count} / 先物: {future_count} / 為替: {fx_count}）\n"
-        f"テクニカル条件 合格数: {len(passed_items)}銘柄\n\n"
+        f"テクニカル条件 合格数: {len(passed_items)}銘柄\n"
+        f"★ / ★(Short) 該当数: {len(ppp_items)}銘柄\n\n"
         f"=== 合格銘柄一覧 ===\n{passed_str}\n\n"
-        + "\n\n".join(grouped_sections)
-        + "\n\n"
+        f"=== ★ / ★(Short) 銘柄一覧 ===\n{ppp_str}\n\n"
+        f"※ ★: MA5>MA20>MA60>MA100>MA300 / ★(Short): MA5>MA20>MA60>MA100\n"
         f"※ 指数・先物・為替は出来高条件を除外して判定しています。\n"
-        f"※ 条件: 終値>MA60、終値>MA5、7日以内のMA20上抜け、前日終値<MA5、MA60/100上向き、陽線（終値>始値）。\n"
         f"※ 50代サラリーマン adoGEM サバイバルロジック"
     )
 
     subject = f"adoGEM マルチアセット [{latest_date_str}] ({len(passed_items)}件合格)"
     send_gmail(subject, body)
-    print("マルチアセット（YouTube英文表題＋日本語本文）レポートメールを送信しました。")
+    print("マルチアセット（合格＋★/★(Short)のみ）レポートメールを送信しました。")
 
 
 if __name__ == "__main__":
