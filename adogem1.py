@@ -243,23 +243,26 @@ def main():
         "【判定結果マーク基準】翌日終値\n ◎ ： +2.0%以上\n ◯ ： +0.1%〜+2.0%\n ▲ ： -0.1%〜+0.1%\n ✕ ： -0.1%未満"
     )
 
-    body = (f"サバイバル投資家adoGEM\n" + 
+    header_titles = (
+        f"{next_day.month}/{next_day.day} My Top Stock Picks ({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} Close)🔥\n"
+        f"Updated Weeknights!\n"
+        f"*Personal research log\n"
+        f"Survival Investor adoGEM\n"
+        f"#JapaneseStocks #adoGEM #StockPicks #InvestingForBeginners #StockMarketNews\n"
+        f"----------------------\n"
+        f"中文版\n"
+        f"{next_day.month}/{next_day.day} ( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 数据) 【adoGEM日股数据】\n"
+        f"50多岁上班族的adoGEM生存逻辑\n"
+        f"========================================"
+    )
+
+    body = (f"{header_titles}\n\n" +
+            f"サバイバル投資家adoGEM\n" + 
             f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}\n総対象: {int(sys.argv[2])-int(sys.argv[1])}件\n\n【各ステージ生存数】\n" + 
             newline.join([f"{i+1}.{label}: {stage_survivors[f'stage{i+1}']}" for i, label in enumerate(["取得", "日足60", "出来高", "下半身", "日足MA20上抜け", "溜め", "右肩", "長期T", "当日陽線"])]) + "\n\n" +
             f"★: {stats['★']} / Short: {stats['★(Short)']} / 通常: {stats['normal_detect']}\n\n【完全合格一覧】\n{final_list_str or '  該当なし'}\n\n" + 
             f"{get_nikkei_evaluation_line()}\n\n{ratio_str}\n\n【本日確定の判定結果】\n" + newline.join(judgement_lines) + "\n" +
-            f"{conditions_text}\n\n" +
-            f"{next_day.month}/{next_day.day} 私の推し株({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n" +
-            f"平日夜更新！\n" +
-            f"​※個人の研究記録/投資は自己責任で\n" +
-            f"Survival Investor adoGEM\n" +
-            f"​​#日本株 #adoGEM #日本株おすすめ #株初心者 #日本株速報\n" +
-            f"BGM:gemini\n" +
-            f"----------------------\n" +
-            f"中文版\n" +
-            f"{next_day.month}/{next_day.day} ( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 数据) 【adoGEM日股数据】\n" +
-            f"50多岁上班族的adoGEM生存逻辑\n" +
-            f"--------------------------------------------------")
+            f"{conditions_text}")
         
     msg = MIMEMultipart()
     msg['From'], msg['To'], msg['Subject'] = SENDER_EMAIL, SENDER_EMAIL, f"📊 adoGEM レポート"
