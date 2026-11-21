@@ -205,7 +205,16 @@ def main():
         "9. 長期トレンド(MA100上昇)\n10. 当日陽線(始値<終値)"
     )
 
+    header_titles = (
+        f"看一眼就懂！本周精选港股 ({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 收盘数据) 【adoGEM量化筛选】\n"
+        f"50多岁日本上班族的adoGEM生存逻辑（港股每周精选）\n\n"
+        f"Clear at a Glance! Top Hong Kong Stocks This Week ({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} Close) [adoGEM Quant Screener]\n"
+        f"adoGEM Survival Logic by a Japanese Salaryman in His 50s (Weekly Hong Kong Stock Picks)\n"
+        f"========================================"
+    )
+
     body = (
+        f"{header_titles}\n\n"
         f"サバイバル投資家adoGEM【香港株 週次レポート】\n"
         f"データ対象日(完全一致): {GLOBAL_LATEST_DATE}\n"
         f"スキャン対象数: {len(CHINA_TARGET_SYMBOLS)}銘柄\n\n"
@@ -217,12 +226,7 @@ def main():
         f"★: {stats['★']} / Short: {stats['★(Short)']} / 通常: {stats['normal_detect']}\n\n"
         f"【完全合格一覧（週末配信候補）】\n{final_list_str or '  該当なし'}\n\n"
         f"{get_market_index_evaluation_line()}\n\n"
-        f"{conditions_text}\n\n"
-        f"--------------------------------------------------\n"
-        f"【Bilibili 中文版标题/简介】\n"
-        f"看一眼就懂！本周精选港股 ({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 收盘数据) 【adoGEM量化筛选】\n"
-        f"50多岁日本上班族的adoGEM生存逻辑（港股每周精选）\n"
-        f"--------------------------------------------------"
+        f"{conditions_text}"
     )
         
     msg = MIMEMultipart()
