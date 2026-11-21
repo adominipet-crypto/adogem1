@@ -260,7 +260,7 @@ def evaluate_series(item):
 
 def build_youtube_title(latest_date_str, passed_count):
     """YouTube貼り付け用の英文表題"""
-    return f"Weekly Market Screener: Indices, Futures & FX ({latest_date_str}) | {passed_count} Setups"
+    return f"Weekly Market Screener: Indices, Futures & FX ({latest_date_str})"
 
 
 def send_gmail(subject, body):
