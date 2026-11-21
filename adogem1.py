@@ -244,11 +244,11 @@ def main():
     )
 
     header_titles = (
-        f"{next_day.month}/{next_day.day} My Top Stock Picks ({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} Close)🔥\n"
-        f"Updated Weeknights!\n"
-        f"*Personal research log\n"
-        f"Survival Investor adoGEM\n"
-        f"#JapaneseStocks #adoGEM #StockPicks #InvestingForBeginners #StockMarketNews\n"
+        f"{next_day.month}/{next_day.day} 私の推し株({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day}大引け)🔥\n"
+        f"平日夜更新！\n"
+        f"※個人の研究記録\n"
+        f"サバイバル投資家adoGEM\n"
+        f"#日本株 #adoGEM #日本株おすすめ #株初心者 #日本株速報\n"
         f"----------------------\n"
         f"中文版\n"
         f"{next_day.month}/{next_day.day} ( {GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} 数据) 【adoGEM日股数据】\n"
