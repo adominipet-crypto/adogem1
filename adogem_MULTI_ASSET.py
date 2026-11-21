@@ -286,9 +286,11 @@ def main():
         results.append(evaluate_series(item))
         time.sleep(REQUEST_SLEEP_SEC)
 
+    ok_items = [r for r in results if r.get("status") == "OK"]
+    error_items = [r for r in results if r.get("status") != "OK"]
     passed_items = [r for r in results if r.get("passed")]
     ppp_items = [r for r in results if r.get("ppp")]
-    latest_dates = [r["date"] for r in results if r.get("date")]
+    latest_dates = [r["date"] for r in ok_items if r.get("date")]
     latest_date_str = max(latest_dates) if latest_dates else str(datetime.date.today())
 
     index_count = sum(1 for r in results if r.get("category") == "INDEX")
@@ -315,6 +317,10 @@ def main():
             )
     ppp_str = "\n\n".join(ppp_grouped_sections) if ppp_grouped_sections else "  該当なし"
 
+    error_symbols_str = (
+        ", ".join([r["symbol"] for r in error_items]) if error_items else "なし"
+    )
+
     body = (
         f"【YouTube貼り付け用 英文表題】\n"
         f"{youtube_title}\n\n"
@@ -323,18 +329,31 @@ def main():
         f"最新日足基準日: {latest_date_str}\n"
         f"対象内訳: 全{len(WIDE_MARKET_WATCHLIST)}銘柄 "
         f"（指数: {index_count} / 先物: {future_count} / 為替: {fx_count}）\n"
+        f"取得銘柄数: {len(ok_items)}/{len(WIDE_MARKET_WATCHLIST)}銘柄取得 "
+        f"（取得不可/不足: {len(error_items)}銘柄 → {error_symbols_str}）\n"
         f"テクニカル条件 合格数: {len(passed_items)}銘柄\n"
         f"★ / ★(Short) 該当数: {len(ppp_items)}銘柄\n\n"
         f"=== 合格銘柄一覧 ===\n{passed_str}\n\n"
         f"=== ★ / ★(Short) 銘柄一覧 ===\n{ppp_str}\n\n"
-        f"※ ★: MA5>MA20>MA60>MA100>MA300 / ★(Short): MA5>MA20>MA60>MA100\n"
+        f"=== スクリーニング条件・凡例 ===\n"
+        f"  [合格条件（7項目・出来高条件は除外）]\n"
+        f"   1. 当日終値 > MA60\n"
+        f"   2. 当日終値 > MA5\n"
+        f"   3. 7日以内にMA20を上抜け（前日以下→当日超え）\n"
+        f"   4. 前日終値 < 前日MA5（押し・ため）\n"
+        f"   5. 当日MA60 > 前日MA60（MA60上向き）\n"
+        f"   6. 当日MA100 > 前日MA100（MA100上向き）\n"
+        f"   7. 当日陽線（当日終値 > 当日始値）\n"
+        f"  [PPP（パーフェクトオーダー）判定]\n"
+        f"   ★       : MA5 > MA20 > MA60 > MA100 > MA300\n"
+        f"   ★(Short): MA5 > MA20 > MA60 > MA100\n\n"
         f"※ 指数・先物・為替は出来高条件を除外して判定しています。\n"
         f"※ 50代サラリーマン adoGEM サバイバルロジック"
     )
 
     subject = f"adoGEM マルチアセット [{latest_date_str}] ({len(passed_items)}件合格)"
     send_gmail(subject, body)
-    print("マルチアセット（合格＋★/★(Short)のみ）レポートメールを送信しました。")
+    print("マルチアセット（取得銘柄数＋条件＋合格/★のみ）レポートメールを送信しました。")
 
 
 if __name__ == "__main__":
