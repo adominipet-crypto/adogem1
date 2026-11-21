@@ -316,7 +316,6 @@ def main():
         f"--------------------------------------------------\n"
         f"【English Title / Description】\n"
         f"Crystal Clear at a Glance! Weekly US Stock Picks ({GLOBAL_LATEST_DATE.month}/{GLOBAL_LATEST_DATE.day} Close) [adoGEM Quant Screener]\n"
-        f"Survival Logic by adoGEM, a Japanese Salaryman in His 50s (Weekly US Stock Picks)\n"
         f"--------------------------------------------------"
     )
 
