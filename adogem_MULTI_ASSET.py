@@ -10,113 +10,113 @@ import time
 import datetime
 import requests
 
-# --- Environment Settings ---
+# --- 環境設定 ---
 SENDER_EMAIL = os.environ.get('EMAIL_ADDRESS')
 SENDER_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
-# --- Wide Multi-Asset Watchlist (75 Instruments) ---
+# --- 指数・先物・為替 ワイド統合リスト（75件） ---
 # category: "INDEX" | "FUTURE" | "FX"
-# group: subgroup summary key for clean grouping in email
+# group: 日本語グループ名
 WIDE_MARKET_WATCHLIST = [
-    # 1. Global Indices & Volatility (14)
-    {"symbol": "^GSPC", "name": "S&P 500 Index", "moomoo": "S&P 500 / SPX", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^IXIC", "name": "NASDAQ Composite", "moomoo": "NASDAQ / IXIC", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^DJI", "name": "Dow Jones Industrial Average", "moomoo": "Dow / DJI", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^RUT", "name": "Russell 2000 Index", "moomoo": "Russell 2000 / RUT", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^NDX", "name": "NASDAQ-100 Index", "moomoo": "NASDAQ 100 / NDX", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^NYA", "name": "NYSE Composite Index", "moomoo": "NYSE Composite", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^SOX", "name": "PHLX Semiconductor Index", "moomoo": "SOX / Semiconductor", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^VIX", "name": "CBOE Volatility Index", "moomoo": "VIX", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^VXN", "name": "NASDAQ-100 Volatility Index", "moomoo": "VXN", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^RVX", "name": "Russell 2000 Volatility Index", "moomoo": "RVX", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^N225", "name": "Nikkei 225", "moomoo": "Nikkei 225", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^HSI", "name": "Hang Seng Index", "moomoo": "Hang Seng / HSI", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^FTSE", "name": "FTSE 100 Index", "moomoo": "FTSE 100", "category": "INDEX", "group": "Global & Volatility Indices"},
-    {"symbol": "^GDAXI", "name": "DAX Performance Index", "moomoo": "DAX", "category": "INDEX", "group": "Global & Volatility Indices"},
+    # 1. 主要指数・ボラティリティ指数（14件）
+    {"symbol": "^GSPC", "name": "S&P 500 Index", "moomoo": "S&P 500 / SPX", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^IXIC", "name": "NASDAQ Composite", "moomoo": "NASDAQ / IXIC", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^DJI", "name": "Dow Jones Industrial Average", "moomoo": "Dow / DJI", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^RUT", "name": "Russell 2000 Index", "moomoo": "Russell 2000 / RUT", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^NDX", "name": "NASDAQ-100 Index", "moomoo": "NASDAQ 100 / NDX", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^NYA", "name": "NYSE Composite Index", "moomoo": "NYSE Composite", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^SOX", "name": "PHLX Semiconductor Index", "moomoo": "SOX / Semiconductor", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^VIX", "name": "CBOE Volatility Index", "moomoo": "VIX", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^VXN", "name": "NASDAQ-100 Volatility Index", "moomoo": "VXN", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^RVX", "name": "Russell 2000 Volatility Index", "moomoo": "RVX", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^N225", "name": "Nikkei 225", "moomoo": "Nikkei 225", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^HSI", "name": "Hang Seng Index", "moomoo": "Hang Seng / HSI", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^FTSE", "name": "FTSE 100 Index", "moomoo": "FTSE 100", "category": "INDEX", "group": "指数・ボラティリティ"},
+    {"symbol": "^GDAXI", "name": "DAX Performance Index", "moomoo": "DAX", "category": "INDEX", "group": "指数・ボラティリティ"},
 
-    # 2. Equity Index Futures (8)
-    {"symbol": "ES=F", "name": "E-mini S&P 500 Futures", "moomoo": "E-mini S&P 500", "category": "FUTURE", "group": "Equity Index Futures"},
-    {"symbol": "NQ=F", "name": "E-mini NASDAQ-100 Futures", "moomoo": "E-mini NASDAQ 100", "category": "FUTURE", "group": "Equity Index Futures"},
-    {"symbol": "YM=F", "name": "E-mini Dow Futures", "moomoo": "E-mini Dow", "category": "FUTURE", "group": "Equity Index Futures"},
-    {"symbol": "RTY=F", "name": "E-mini Russell 2000 Futures", "moomoo": "E-mini Russell 2000", "category": "FUTURE", "group": "Equity Index Futures"},
-    {"symbol": "NKD=F", "name": "Nikkei 225 USD Futures", "moomoo": "Nikkei Futures", "category": "FUTURE", "group": "Equity Index Futures"},
-    {"symbol": "FDAX=F", "name": "DAX Futures", "moomoo": "DAX Futures", "category": "FUTURE", "group": "Equity Index Futures"},
-    {"symbol": "FESX=F", "name": "Euro Stoxx 50 Futures", "moomoo": "Euro Stoxx 50", "category": "FUTURE", "group": "Equity Index Futures"},
-    {"symbol": "HSI=F", "name": "Hang Seng Index Futures", "moomoo": "Hang Seng Futures", "category": "FUTURE", "group": "Equity Index Futures"},
+    # 2. 株価指数先物（8件）
+    {"symbol": "ES=F", "name": "E-mini S&P 500 Futures", "moomoo": "E-mini S&P 500", "category": "FUTURE", "group": "株価指数先物"},
+    {"symbol": "NQ=F", "name": "E-mini NASDAQ-100 Futures", "moomoo": "E-mini NASDAQ 100", "category": "FUTURE", "group": "株価指数先物"},
+    {"symbol": "YM=F", "name": "E-mini Dow Futures", "moomoo": "E-mini Dow", "category": "FUTURE", "group": "株価指数先物"},
+    {"symbol": "RTY=F", "name": "E-mini Russell 2000 Futures", "moomoo": "E-mini Russell 2000", "category": "FUTURE", "group": "株価指数先物"},
+    {"symbol": "NKD=F", "name": "Nikkei 225 USD Futures", "moomoo": "Nikkei Futures", "category": "FUTURE", "group": "株価指数先物"},
+    {"symbol": "FDAX=F", "name": "DAX Futures", "moomoo": "DAX Futures", "category": "FUTURE", "group": "株価指数先物"},
+    {"symbol": "FESX=F", "name": "Euro Stoxx 50 Futures", "moomoo": "Euro Stoxx 50", "category": "FUTURE", "group": "株価指数先物"},
+    {"symbol": "HSI=F", "name": "Hang Seng Index Futures", "moomoo": "Hang Seng Futures", "category": "FUTURE", "group": "株価指数先物"},
 
-    # 3. Agricultural & Livestock Futures (14)
-    {"symbol": "ZS=F", "name": "Soybeans Futures", "moomoo": "Soybeans", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "ZC=F", "name": "Corn Futures", "moomoo": "Corn", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "ZW=F", "name": "Chicago SRW Wheat Futures", "moomoo": "SRW Wheat", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "KE=F", "name": "KC HRW Wheat Futures", "moomoo": "HRW Wheat", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "ZO=F", "name": "Oats Futures", "moomoo": "Oats", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "ZR=F", "name": "Rough Rice Futures", "moomoo": "Rough Rice", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "ZM=F", "name": "Soybean Meal Futures", "moomoo": "Soybean Meal", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "ZL=F", "name": "Soybean Oil Futures", "moomoo": "Soybean Oil", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "KC=F", "name": "Coffee C Futures", "moomoo": "Coffee", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "SB=F", "name": "Sugar No. 11 Futures", "moomoo": "Sugar", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "CC=F", "name": "Cocoa Futures", "moomoo": "Cocoa", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "CT=F", "name": "Cotton No. 2 Futures", "moomoo": "Cotton", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "LE=F", "name": "Live Cattle Futures", "moomoo": "Live Cattle", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
-    {"symbol": "HE=F", "name": "Lean Hogs Futures", "moomoo": "Lean Hogs", "category": "FUTURE", "group": "Agricultural & Livestock Futures"},
+    # 3. 農産物・畜産先物（14件）
+    {"symbol": "ZS=F", "name": "Soybeans Futures", "moomoo": "Soybeans", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "ZC=F", "name": "Corn Futures", "moomoo": "Corn", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "ZW=F", "name": "Chicago SRW Wheat Futures", "moomoo": "SRW Wheat", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "KE=F", "name": "KC HRW Wheat Futures", "moomoo": "HRW Wheat", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "ZO=F", "name": "Oats Futures", "moomoo": "Oats", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "ZR=F", "name": "Rough Rice Futures", "moomoo": "Rough Rice", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "ZM=F", "name": "Soybean Meal Futures", "moomoo": "Soybean Meal", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "ZL=F", "name": "Soybean Oil Futures", "moomoo": "Soybean Oil", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "KC=F", "name": "Coffee C Futures", "moomoo": "Coffee", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "SB=F", "name": "Sugar No. 11 Futures", "moomoo": "Sugar", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "CC=F", "name": "Cocoa Futures", "moomoo": "Cocoa", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "CT=F", "name": "Cotton No. 2 Futures", "moomoo": "Cotton", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "LE=F", "name": "Live Cattle Futures", "moomoo": "Live Cattle", "category": "FUTURE", "group": "農産物・畜産先物"},
+    {"symbol": "HE=F", "name": "Lean Hogs Futures", "moomoo": "Lean Hogs", "category": "FUTURE", "group": "農産物・畜産先物"},
 
-    # 4. Energy, Metals & Treasury Futures (15)
-    {"symbol": "CL=F", "name": "WTI Crude Oil Futures", "moomoo": "WTI Crude Oil", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "BZ=F", "name": "Brent Crude Oil Futures", "moomoo": "Brent Crude Oil", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "NG=F", "name": "Henry Hub Natural Gas Futures", "moomoo": "Natural Gas", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "RB=F", "name": "RBOB Gasoline Futures", "moomoo": "RBOB Gasoline", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "HO=F", "name": "NY Harbor ULSD Heating Oil Futures", "moomoo": "Heating Oil", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "GC=F", "name": "Gold Futures", "moomoo": "Gold", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "SI=F", "name": "Silver Futures", "moomoo": "Silver", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "PL=F", "name": "Platinum Futures", "moomoo": "Platinum", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "PA=F", "name": "Palladium Futures", "moomoo": "Palladium", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "HG=F", "name": "Copper Futures", "moomoo": "Copper", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "ALI=F", "name": "Aluminum Futures", "moomoo": "Aluminum", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "ZB=F", "name": "U.S. Treasury Bond Futures (30Y)", "moomoo": "30Y T-Bond", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "ZN=F", "name": "10-Year T-Note Futures", "moomoo": "10Y T-Note", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "ZF=F", "name": "5-Year T-Note Futures", "moomoo": "5Y T-Note", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
-    {"symbol": "ZT=F", "name": "2-Year T-Note Futures", "moomoo": "2Y T-Note", "category": "FUTURE", "group": "Energy, Metals & Rates Futures"},
+    # 4. エネルギー・金属・金利先物（15件）
+    {"symbol": "CL=F", "name": "WTI Crude Oil Futures", "moomoo": "WTI Crude Oil", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "BZ=F", "name": "Brent Crude Oil Futures", "moomoo": "Brent Crude Oil", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "NG=F", "name": "Henry Hub Natural Gas Futures", "moomoo": "Natural Gas", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "RB=F", "name": "RBOB Gasoline Futures", "moomoo": "RBOB Gasoline", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "HO=F", "name": "NY Harbor ULSD Heating Oil Futures", "moomoo": "Heating Oil", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "GC=F", "name": "Gold Futures", "moomoo": "Gold", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "SI=F", "name": "Silver Futures", "moomoo": "Silver", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "PL=F", "name": "Platinum Futures", "moomoo": "Platinum", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "PA=F", "name": "Palladium Futures", "moomoo": "Palladium", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "HG=F", "name": "Copper Futures", "moomoo": "Copper", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "ALI=F", "name": "Aluminum Futures", "moomoo": "Aluminum", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "ZB=F", "name": "U.S. Treasury Bond Futures (30Y)", "moomoo": "30Y T-Bond", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "ZN=F", "name": "10-Year T-Note Futures", "moomoo": "10Y T-Note", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "ZF=F", "name": "5-Year T-Note Futures", "moomoo": "5Y T-Note", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
+    {"symbol": "ZT=F", "name": "2-Year T-Note Futures", "moomoo": "2Y T-Note", "category": "FUTURE", "group": "エネルギー・金属・金利先物"},
 
-    # 5. Foreign Exchange / FX Pairs (24)
-    {"symbol": "DX-Y.NYB", "name": "US Dollar Index (DXY)", "moomoo": "DXY", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "USDJPY=X", "name": "USD/JPY", "moomoo": "USDJPY", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "EURUSD=X", "name": "EUR/USD", "moomoo": "EURUSD", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "GBPUSD=X", "name": "GBP/USD", "moomoo": "GBPUSD", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "USDCHF=X", "name": "USD/CHF", "moomoo": "USDCHF", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "USDCAD=X", "name": "USD/CAD", "moomoo": "USDCAD", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "AUDUSD=X", "name": "AUD/USD", "moomoo": "AUDUSD", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "NZDUSD=X", "name": "NZD/USD", "moomoo": "NZDUSD", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "EURJPY=X", "name": "EUR/JPY", "moomoo": "EURJPY", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "GBPJPY=X", "name": "GBP/JPY", "moomoo": "GBPJPY", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "AUDJPY=X", "name": "AUD/JPY", "moomoo": "AUDJPY", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "NZDJPY=X", "name": "NZD/JPY", "moomoo": "NZDJPY", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "CADJPY=X", "name": "CAD/JPY", "moomoo": "CADJPY", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "CHFJPY=X", "name": "CHF/JPY", "moomoo": "CHFJPY", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "EURGBP=X", "name": "EUR/GBP", "moomoo": "EURGBP", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "EURAUD=X", "name": "EUR/AUD", "moomoo": "EURAUD", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "AUDNZD=X", "name": "AUD/NZD", "moomoo": "AUDNZD", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "USDCNH=X", "name": "USD/CNH", "moomoo": "USDCNH", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "USDHKD=X", "name": "USD/HKD", "moomoo": "USDHKD", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "USDSGD=X", "name": "USD/SGD", "moomoo": "USDSGD", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "USDKRW=X", "name": "USD/KRW", "moomoo": "USDKRW", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "USDMXN=X", "name": "USD/MXN", "moomoo": "USDMXN", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "USDZAR=X", "name": "USD/ZAR", "moomoo": "USDZAR", "category": "FX", "group": "FX Pairs & Dollar Index"},
-    {"symbol": "USDTRY=X", "name": "USD/TRY", "moomoo": "USDTRY", "category": "FX", "group": "FX Pairs & Dollar Index"},
+    # 5. 為替・ドル指数（24件）
+    {"symbol": "DX-Y.NYB", "name": "US Dollar Index (DXY)", "moomoo": "DXY", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "USDJPY=X", "name": "USD/JPY", "moomoo": "USDJPY", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "EURUSD=X", "name": "EUR/USD", "moomoo": "EURUSD", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "GBPUSD=X", "name": "GBP/USD", "moomoo": "GBPUSD", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "USDCHF=X", "name": "USD/CHF", "moomoo": "USDCHF", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "USDCAD=X", "name": "USD/CAD", "moomoo": "USDCAD", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "AUDUSD=X", "name": "AUD/USD", "moomoo": "AUDUSD", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "NZDUSD=X", "name": "NZD/USD", "moomoo": "NZDUSD", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "EURJPY=X", "name": "EUR/JPY", "moomoo": "EURJPY", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "GBPJPY=X", "name": "GBP/JPY", "moomoo": "GBPJPY", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "AUDJPY=X", "name": "AUD/JPY", "moomoo": "AUDJPY", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "NZDJPY=X", "name": "NZD/JPY", "moomoo": "NZDJPY", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "CADJPY=X", "name": "CAD/JPY", "moomoo": "CADJPY", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "CHFJPY=X", "name": "CHF/JPY", "moomoo": "CHFJPY", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "EURGBP=X", "name": "EUR/GBP", "moomoo": "EURGBP", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "EURAUD=X", "name": "EUR/AUD", "moomoo": "EURAUD", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "AUDNZD=X", "name": "AUD/NZD", "moomoo": "AUDNZD", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "USDCNH=X", "name": "USD/CNH", "moomoo": "USDCNH", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "USDHKD=X", "name": "USD/HKD", "moomoo": "USDHKD", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "USDSGD=X", "name": "USD/SGD", "moomoo": "USDSGD", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "USDKRW=X", "name": "USD/KRW", "moomoo": "USDKRW", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "USDMXN=X", "name": "USD/MXN", "moomoo": "USDMXN", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "USDZAR=X", "name": "USD/ZAR", "moomoo": "USDZAR", "category": "FX", "group": "為替・ドル指数"},
+    {"symbol": "USDTRY=X", "name": "USD/TRY", "moomoo": "USDTRY", "category": "FX", "group": "為替・ドル指数"},
 ]
 
 GROUP_ORDER = [
-    "Global & Volatility Indices",
-    "Equity Index Futures",
-    "Agricultural & Livestock Futures",
-    "Energy, Metals & Rates Futures",
-    "FX Pairs & Dollar Index",
+    "指数・ボラティリティ",
+    "株価指数先物",
+    "農産物・畜産先物",
+    "エネルギー・金属・金利先物",
+    "為替・ドル指数",
 ]
 
 REQUEST_SLEEP_SEC = 0.5
 
 
 def fetch_series_df(symbol):
-    """Fetch daily OHLCV from Yahoo Finance v8 chart API."""
+    """Yahoo Finance v8 chart API から日足データを取得"""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     encoded_symbol = symbol.replace("^", "%5E").replace("=", "%3D")
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{encoded_symbol}?range=5y&interval=1d&nocache={int(time.time())}"
@@ -157,7 +157,6 @@ def fetch_series_df(symbol):
 
 
 def format_price(val, category):
-    """Format price precision based on asset category."""
     if category == "FX":
         if val >= 100:
             return f"{val:.2f}"
@@ -168,7 +167,7 @@ def format_price(val, category):
 
 
 def evaluate_series(item):
-    """Evaluate technical setup without volume filter (suitable for Indices, Futures, and FX)."""
+    """出来高条件を除いた7条件＋PPP判定（指数・先物・為替向け）"""
     symbol = item["symbol"]
     name = item["name"]
     moomoo_key = item["moomoo"]
@@ -184,7 +183,7 @@ def evaluate_series(item):
             "category": category,
             "group": group,
             "status": "ERROR",
-            "label": f"  ? | {name} ({symbol}) [moomoo: {moomoo_key}] | Data unavailable/insufficient",
+            "label": f"  ？ | {name} ({symbol}) [moomoo: {moomoo_key}] | データ取得不可/不足",
             "passed": False,
             "ppp": "",
         }
@@ -238,7 +237,7 @@ def evaluate_series(item):
     )
     ppp = "★ " if is_full_ppp else ("★(Short) " if is_short_ppp else "")
 
-    mark = "PASS" if passed else "----"
+    mark = "合格" if passed else "----"
     price_str = format_price(curr_val, category)
     line = (
         f"  [{mark}] {ppp}{name} ({symbol}) [moomoo: {moomoo_key}] | "
@@ -259,9 +258,14 @@ def evaluate_series(item):
     }
 
 
+def build_youtube_title(latest_date_str, passed_count):
+    """YouTube貼り付け用の英文表題"""
+    return f"Weekly Market Screener: Indices, Futures & FX ({latest_date_str}) | {passed_count} Setups"
+
+
 def send_gmail(subject, body):
     if not SENDER_EMAIL or not SENDER_PASSWORD:
-        raise ValueError("EMAIL_ADDRESS or EMAIL_PASSWORD environment variable is missing.")
+        raise ValueError("EMAIL_ADDRESS または EMAIL_PASSWORD 環境変数が設定されていません。")
 
     msg = MIMEMultipart()
     msg["From"] = SENDER_EMAIL
@@ -290,12 +294,14 @@ def main():
     future_count = sum(1 for r in results if r.get("category") == "FUTURE")
     fx_count = sum(1 for r in results if r.get("category") == "FX")
 
+    youtube_title = build_youtube_title(latest_date_str, len(passed_items))
+
     passed_str = (
         "\n".join([
-            f"  {r['ppp']}[PASS] {r['name']} ({r['symbol']}) [moomoo: {r['moomoo']}] [{r['date'][5:]}]"
+            f"  {r['ppp']}[合格] {r['name']} ({r['symbol']}) [moomoo: {r['moomoo']}] [{r['date'][5:]}]"
             for r in passed_items
         ])
-        or "  None"
+        or "  該当なし"
     )
 
     grouped_sections = []
@@ -303,28 +309,29 @@ def main():
         grp_lines = [r["label"] for r in results if r.get("group") == grp]
         if grp_lines:
             grouped_sections.append(
-                f"=== {grp} ({len(grp_lines)}) ===\n" + "\n".join(grp_lines)
+                f"=== {grp}（{len(grp_lines)}件） ===\n" + "\n".join(grp_lines)
             )
 
     body = (
-        f"adoGEM Weekly Multi-Asset Screener — Indices, Futures & FX\n"
-        f"Latest Daily Close Date: {latest_date_str}\n"
-        f"Coverage Summary: {len(WIDE_MARKET_WATCHLIST)} instruments total "
-        f"(Indices: {index_count} | Futures: {future_count} | FX: {fx_count})\n"
-        f"Technical Filter Passed: {len(passed_items)}\n\n"
-        f"=== PASSED SIGNALS ===\n{passed_str}\n\n"
+        f"【YouTube貼り付け用 英文表題】\n"
+        f"{youtube_title}\n\n"
+        f"========================================\n"
+        f"adoGEM 週次マルチアセット・スクリーナー（指数・先物・為替）\n"
+        f"最新日足基準日: {latest_date_str}\n"
+        f"対象内訳: 全{len(WIDE_MARKET_WATCHLIST)}銘柄 "
+        f"（指数: {index_count} / 先物: {future_count} / 為替: {fx_count}）\n"
+        f"テクニカル条件 合格数: {len(passed_items)}銘柄\n\n"
+        f"=== 合格銘柄一覧 ===\n{passed_str}\n\n"
         + "\n\n".join(grouped_sections)
         + "\n\n"
-        f"Notes:\n"
-        f"- Volume filter is excluded for non-equity instruments (Indices, Futures, FX).\n"
-        f"- Rules: Close > MA60, Close > MA5, MA20 bullish cross within 7 days, "
-        f"prior Close < MA5, rising MA60 & MA100, and bullish daily candle (Close > Open).\n"
-        f"- Survival Logic by adoGEM, a Japanese Salaryman in His 50s."
+        f"※ 指数・先物・為替は出来高条件を除外して判定しています。\n"
+        f"※ 条件: 終値>MA60、終値>MA5、7日以内のMA20上抜け、前日終値<MA5、MA60/100上向き、陽線（終値>始値）。\n"
+        f"※ 50代サラリーマン adoGEM サバイバルロジック"
     )
 
-    subject = f"adoGEM Multi-Asset [{latest_date_str}] ({len(passed_items)} Pass)"
+    subject = f"adoGEM マルチアセット [{latest_date_str}] ({len(passed_items)}件合格)"
     send_gmail(subject, body)
-    print("English multi-asset report email sent successfully.")
+    print("マルチアセット（YouTube英文表題＋日本語本文）レポートメールを送信しました。")
 
 
 if __name__ == "__main__":
