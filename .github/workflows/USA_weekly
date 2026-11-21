@@ -1,0 +1,40 @@
+name: adoGEM US Stock Weekly Screener
+
+on:
+  schedule:
+    # 日本時間 土曜 08:00 (UTC 金曜 23:00) に定期実行
+    # 米国市場(金曜引け)終了後なので、土曜の午前〜昼過ぎには完了想定
+    - cron: "0 23 * * 5"
+  workflow_dispatch:
+    # GitHub画面から手動実行したい場合用
+
+permissions:
+  contents: read
+
+jobs:
+  screen-us-stocks:
+    runs-on: ubuntu-latest
+    # 全銘柄をゆっくり巡回しても余裕を持って収まるようタイムアウトを設定（最大360分）
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas requests
+
+      - name: Run US stock screener and send Gmail
+        env:
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          python adogem_usa.py
